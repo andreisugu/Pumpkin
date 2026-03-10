@@ -13,6 +13,7 @@ pub mod flowerbed;
 pub mod fungus;
 pub mod kelp;
 pub mod leaf_litter;
+pub mod leaves;
 pub mod lily_pad;
 pub mod mushroom_plant;
 pub mod nether_sprouts;

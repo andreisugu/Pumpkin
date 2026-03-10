@@ -58,6 +58,7 @@ use crate::block::blocks::plant::flowerbed::FlowerbedBlock;
 use crate::block::blocks::plant::fungus::FungusBlock;
 use crate::block::blocks::plant::kelp::KelpBlock;
 use crate::block::blocks::plant::leaf_litter::LeafLitterBlock;
+use crate::block::blocks::plant::leaves::LeavesBlock;
 use crate::block::blocks::plant::lily_pad::LilyPadBlock;
 use crate::block::blocks::plant::mushroom_plant::MushroomPlantBlock;
 use crate::block::blocks::plant::nether_sprouts::NetherSproutsBlock;
@@ -225,6 +226,7 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(MushroomPlantBlock);
     manager.register(FlowerbedBlock);
     manager.register(LeafLitterBlock);
+    manager.register(LeavesBlock);
     manager.register(WallBlock);
     manager.register(RootsBlock);
     manager.register(NetherPortalBlock);

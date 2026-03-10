@@ -880,7 +880,9 @@ impl World {
         for block_entity in tick_data.block_entities {
             block_entity.tick(&world).await;
         }
+
     }
+
 
     pub async fn get_fluid_collisions(self: &Arc<Self>, bounding_box: BoundingBox) -> Vec<&Fluid> {
         let mut collisions = Vec::new();
