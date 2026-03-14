@@ -2808,8 +2808,13 @@ impl World {
 
     pub async fn spawn_entity(&self, entity: Arc<dyn EntityBase>) {
         let base_entity = entity.get_entity();
-        self.broadcast_packet_all(&base_entity.create_spawn_packet())
-            .await;
+        let pos = base_entity.pos.load();
+        self.broadcast_packet_nearby(
+            &pos,
+            Self::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+            &base_entity.create_spawn_packet(),
+        )
+        .await;
         entity.init_data_tracker().await;
 
         let chunk_coordinate = base_entity.block_pos.load().chunk_position();
@@ -2835,8 +2840,13 @@ impl World {
             new_entities
         });
 
-        self.broadcast_packet_all(&CRemoveEntities::new(&[entity.entity_id.into()]))
-            .await;
+        let pos = entity.pos.load();
+        self.broadcast_packet_nearby(
+            &pos,
+            Self::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+            &CRemoveEntities::new(&[entity.entity_id.into()]),
+        )
+        .await;
 
         self.remove_entity_data(entity).await;
     }
@@ -3183,8 +3193,17 @@ impl World {
     /* End ItemScatterer.java */
 
     pub async fn sync_world_event(&self, world_event: WorldEvent, position: BlockPos, data: i32) {
-        self.broadcast_packet_all(&CWorldEvent::new(world_event as i32, position, data, false))
-            .await;
+        let center = Vector3::new(
+            f64::from(position.0.x),
+            f64::from(position.0.y),
+            f64::from(position.0.z),
+        );
+        self.broadcast_packet_nearby(
+            &center,
+            Self::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+            &CWorldEvent::new(world_event as i32, position, data, false),
+        )
+        .await;
     }
     #[must_use]
     pub fn is_valid(dest: BlockPos) -> bool {

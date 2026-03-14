@@ -516,7 +516,16 @@ impl LivingEntity {
             flag,
         );
 
-        self.entity.world.load().broadcast_packet_all(&packet).await;
+        let pos = self.entity.pos.load();
+        self.entity
+            .world
+            .load()
+            .broadcast_packet_nearby(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &packet,
+            )
+            .await;
     }
 
     pub async fn remove_effect(&self, effect_type: &'static StatusEffect) -> bool {
@@ -706,14 +715,15 @@ impl LivingEntity {
     }
 
     pub async fn swing_hand(&self) {
-        // TODO: radius
+        let pos = self.entity.pos.load();
         self.entity
             .world
             .load()
-            .broadcast_packet_all(&CEntityAnimation::new(
-                self.entity_id().into(),
-                Animation::SwingMainArm,
-            ))
+            .broadcast_packet_nearby(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CEntityAnimation::new(self.entity_id().into(), Animation::SwingMainArm),
+            )
             .await;
     }
 
@@ -1894,19 +1904,29 @@ impl EntityBase for LivingEntity {
                     (src.z - tgt.z).atan2(src.x - tgt.x).to_degrees() as f32
                         - self.entity.yaw.load()
                 });
+                let pos = self.entity.pos.load();
                 world
-                    .broadcast_packet_all(&CHurtAnimation::new(entity_id, hurt_yaw))
+                    .broadcast_packet_nearby(
+                        &pos,
+                        World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                        &CHurtAnimation::new(entity_id, hurt_yaw),
+                    )
                     .await;
             }
 
+            let pos = self.entity.pos.load();
             world
-                .broadcast_packet_all(&CDamageEvent::new(
-                    self.entity.entity_id.into(),
-                    damage_type.id.into(),
-                    source.map(|e| e.get_entity().entity_id.into()),
-                    cause.map(|e| e.get_entity().entity_id.into()),
-                    position,
-                ))
+                .broadcast_packet_nearby(
+                    &pos,
+                    World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                    &CDamageEvent::new(
+                        self.entity.entity_id.into(),
+                        damage_type.id.into(),
+                        source.map(|e| e.get_entity().entity_id.into()),
+                        cause.map(|e| e.get_entity().entity_id.into()),
+                        position,
+                    ),
+                )
                 .await;
 
             // Try to spawn infested silverfish

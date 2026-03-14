@@ -600,9 +600,14 @@ impl Entity {
 
     pub async fn send_velocity(&self) {
         let velocity = self.velocity.load();
+        let pos = self.pos.load();
         self.world
             .load()
-            .broadcast_packet_all(&CEntityVelocity::new(self.entity_id.into(), velocity))
+            .broadcast_packet_nearby(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CEntityVelocity::new(self.entity_id.into(), velocity),
+            )
             .await;
     }
 
@@ -701,14 +706,19 @@ impl Entity {
 
         let pitch = (pitch * 256.0 / 360.0).rem_euclid(256.0);
 
+        let pos = self.pos.load();
         self.world
             .load()
-            .broadcast_packet_all(&CUpdateEntityRot::new(
-                self.entity_id.into(),
-                yaw,
-                pitch as u8,
-                self.on_ground.load(Relaxed),
-            ))
+            .broadcast_packet_nearby(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CUpdateEntityRot::new(
+                    self.entity_id.into(),
+                    yaw,
+                    pitch as u8,
+                    self.on_ground.load(Relaxed),
+                ),
+            )
             .await;
 
         self.send_head_rot(yaw).await;
@@ -2265,8 +2275,13 @@ impl Entity {
             .collect();
 
         let world = self.world.load();
+        let pos = self.pos.load();
         world
-            .broadcast_packet_all(&CSetPassengers::new(VarInt(self.entity_id), &passenger_ids))
+            .broadcast_packet_nearby(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CSetPassengers::new(VarInt(self.entity_id), &passenger_ids),
+            )
             .await;
     }
 
@@ -2324,13 +2339,25 @@ impl Entity {
             // then broadcasts to other players separately.
             let world = self.world.load();
             let passengers_packet = CSetPassengers::new(VarInt(self.entity_id), &passenger_ids);
+            let pos = self.pos.load();
             if let Some(player) = passenger.get_player() {
                 player.client.enqueue_packet(&passengers_packet).await;
                 world
-                    .broadcast_packet_except(&[player.gameprofile.id], &passengers_packet)
+                    .broadcast_packet_nearby_except(
+                        &pos,
+                        World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                        &[player.gameprofile.id],
+                        &passengers_packet,
+                    )
                     .await;
             } else {
-                world.broadcast_packet_all(&passengers_packet).await;
+                world
+                    .broadcast_packet_nearby(
+                        &pos,
+                        World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                        &passengers_packet,
+                    )
+                    .await;
             }
 
             // Calculate dismount offset (vanilla getPassengerDismountOffset)
@@ -2447,8 +2474,13 @@ impl Entity {
         } else {
             // No passenger was removed, still need to broadcast the passenger list
             let world = self.world.load();
+            let pos = self.pos.load();
             world
-                .broadcast_packet_all(&CSetPassengers::new(VarInt(self.entity_id), &passenger_ids))
+                .broadcast_packet_nearby(
+                    &pos,
+                    World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                    &CSetPassengers::new(VarInt(self.entity_id), &passenger_ids),
+                )
                 .await;
         }
     }

@@ -1352,11 +1352,13 @@ impl Player {
             )])
             .await;
 
+        let pos = self.living_entity.entity.pos.load();
         world
-            .broadcast_packet_all(&CEntityAnimation::new(
-                self.entity_id().into(),
-                Animation::LeaveBed,
-            ))
+            .broadcast_packet_nearby(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CEntityAnimation::new(self.entity_id().into(), Animation::LeaveBed),
+            )
             .await;
 
         self.sleeping_since.store(None);
@@ -2837,11 +2839,23 @@ impl Player {
         };
 
         let packet = CEntityAnimation::new(entity_id, animation);
+        let pos = self.living_entity.entity.pos.load();
         if all {
-            world.broadcast_packet_all(&packet).await;
+            world
+                .broadcast_packet_nearby(
+                    &pos,
+                    World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                    &packet,
+                )
+                .await;
         } else {
             world
-                .broadcast_packet_except(&[self.gameprofile.id], &packet)
+                .broadcast_packet_nearby_except(
+                    &pos,
+                    World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                    &[self.gameprofile.id],
+                    &packet,
+                )
                 .await;
         }
     }
