@@ -38,8 +38,10 @@ pub async fn update_position(player: &Arc<Player>) {
 
     match &player.client {
         ClientPlatform::Java(java_client) => {
+            // Use enqueue_packet instead of send_packet_now to avoid blocking
+            // the tick loop while the packet is written and flushed.
             java_client
-                .send_packet_now(&CCenterChunk {
+                .enqueue_packet(&CCenterChunk {
                     chunk_x: new_chunk_center.x.into(),
                     chunk_z: new_chunk_center.y.into(),
                 })
