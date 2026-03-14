@@ -508,6 +508,10 @@ impl GenerationSchedule {
     }
 
     fn unload_chunk(&mut self) {
+        // First garbage collect dependency_stage for all chunks, moving them
+        // to unload_chunks if they are no longer needed.
+        self.gc_dependency_stages();
+
         let mut unload_chunks = HashSetType::default();
         swap(&mut unload_chunks, &mut self.unload_chunks);
         let mut chunks = Vec::with_capacity(unload_chunks.len());
@@ -560,6 +564,39 @@ impl GenerationSchedule {
                 "Failed to send chunks to io write thread during save (may have shut down): {:?}",
                 e
             );
+        }
+    }
+
+    fn gc_dependency_stages(&mut self) {
+        let mut expected_deps: rustc_hash::FxHashMap<ChunkPos, StagedChunkEnum> = rustc_hash::FxHashMap::default();
+        for (_, node) in &self.graph.nodes {
+            if node.stage == StagedChunkEnum::None {
+                continue;
+            }
+            let radius = node.stage.get_direct_radius();
+            if radius > 0 {
+                let deps = node.stage.get_direct_dependencies();
+                for dx in -radius..=radius {
+                    for dz in -radius..=radius {
+                        let dep_pos = node.pos.add_raw(dx, dz);
+                        let req = deps[dx.abs().max(dz.abs()) as usize];
+                        let curr = expected_deps.entry(dep_pos).or_insert(StagedChunkEnum::None);
+                        if *curr < req {
+                            *curr = req;
+                        }
+                    }
+                }
+            }
+        }
+        
+        for (pos, holder) in &mut self.chunk_map {
+            let expected = expected_deps.get(pos).copied().unwrap_or(StagedChunkEnum::None);
+            if holder.dependency_stage != expected {
+                holder.dependency_stage = expected;
+            }
+            if holder.target_stage == StagedChunkEnum::None && holder.dependency_stage == StagedChunkEnum::None {
+                self.unload_chunks.insert(*pos);
+            }
         }
     }
 
@@ -764,9 +801,8 @@ impl GenerationSchedule {
                             // is no longer needed, clear dependency_stage and queue unload.
                             if holder.target_stage == StagedChunkEnum::None
                                 && new_pos != pos
-                                && holder.current_stage >= holder.dependency_stage
+                                && holder.dependency_stage == StagedChunkEnum::None
                             {
-                                holder.dependency_stage = StagedChunkEnum::None;
                                 self.unload_chunks.insert(new_pos);
                             }
 
@@ -800,11 +836,10 @@ impl GenerationSchedule {
                                     self.drop_node(holder.occupied);
                                 }
 
-                                // Clear dependency_stage and queue unload if no longer needed
+                                // Queue unload if no longer needed
                                 if holder.target_stage == StagedChunkEnum::None
-                                    && holder.current_stage >= holder.dependency_stage
+                                    && holder.dependency_stage == StagedChunkEnum::None
                                 {
-                                    holder.dependency_stage = StagedChunkEnum::None;
                                     self.unload_chunks.insert(new_pos);
                                 }
                             }
