@@ -48,7 +48,7 @@ use tokio::{
     sync::{Mutex, oneshot},
 };
 use tokio::{
-    sync::mpsc::{Receiver, Sender, error::TryRecvError},
+    sync::mpsc::{error::TryRecvError, unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
@@ -86,13 +86,13 @@ pub struct JavaClient {
     /// An notifier that is triggered when this client is closed.
     close_token: CancellationToken,
     /// A normal-priority queue of serialized packets to send to the network.
-    outgoing_packet_queue_send: Sender<OutgoingPacket>,
+    outgoing_packet_queue_send: UnboundedSender<OutgoingPacket>,
     /// A normal-priority queue of serialized packets to send to the network.
-    outgoing_packet_queue_recv: Option<Receiver<OutgoingPacket>>,
+    outgoing_packet_queue_recv: Option<UnboundedReceiver<OutgoingPacket>>,
     /// A high-priority queue of serialized packets to send to the network.
-    outgoing_packet_priority_send: Sender<OutgoingPacket>,
+    outgoing_packet_priority_send: UnboundedSender<OutgoingPacket>,
     /// A high-priority queue of serialized packets to send to the network.
-    outgoing_packet_priority_recv: Option<Receiver<OutgoingPacket>>,
+    outgoing_packet_priority_recv: Option<UnboundedReceiver<OutgoingPacket>>,
     /// The packet encoder for outgoing packets.
     network_writer: Arc<Mutex<TCPNetworkEncoder<BufWriter<OwnedWriteHalf>>>>,
     /// The packet decoder for incoming packets.
@@ -130,8 +130,8 @@ impl JavaClient {
     #[must_use]
     pub fn new(tcp_stream: TcpStream, address: SocketAddr, id: u64) -> Self {
         let (read, write) = tcp_stream.into_split();
-        let (send, recv) = tokio::sync::mpsc::channel(128);
-        let (priority_send, priority_recv) = tokio::sync::mpsc::channel(128);
+        let (send, recv) = unbounded_channel();
+        let (priority_send, priority_recv) = unbounded_channel();
         Self {
             id,
             gameprofile: Mutex::new(None),
@@ -273,7 +273,6 @@ impl JavaClient {
         if let Err(err) = self
             .outgoing_packet_queue_send
             .send(OutgoingPacket::normal(packet_data))
-            .await
         {
             // This is expected to fail if we are closed
             if !self.close_token.is_cancelled() {
@@ -345,7 +344,6 @@ impl JavaClient {
         if let Err(err) = self
             .outgoing_packet_priority_send
             .send(OutgoingPacket::high_priority(packet, completion_tx))
-            .await
         {
             // It is expected that the packet will fail if we are closed
             if !self.close_token.is_cancelled() {

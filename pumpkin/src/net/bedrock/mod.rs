@@ -50,7 +50,7 @@ use std::net::SocketAddr;
 use tokio::{
     net::UdpSocket,
     sync::Mutex,
-    sync::mpsc::{Receiver, Sender},
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
@@ -71,9 +71,9 @@ pub struct BedrockClient {
     pub be_clients: Arc<Mutex<HashMap<SocketAddr, Arc<Self>>>>,
 
     tasks: TaskTracker,
-    outgoing_packet_queue_send: Sender<Bytes>,
+    outgoing_packet_queue_send: UnboundedSender<Bytes>,
     /// A queue of serialized packets to send to the network
-    outgoing_packet_queue_recv: Option<Receiver<Bytes>>,
+    outgoing_packet_queue_recv: Option<UnboundedReceiver<Bytes>>,
 
     /// The packet encoder for outgoing packets.
     network_writer: Arc<Mutex<UDPNetworkEncoder>>,
@@ -100,7 +100,7 @@ impl BedrockClient {
         address: SocketAddr,
         be_clients: Arc<Mutex<HashMap<SocketAddr, Arc<Self>>>>,
     ) -> Self {
-        let (send, recv) = tokio::sync::mpsc::channel(128);
+        let (send, recv) = unbounded_channel();
         Self {
             socket,
             player: Mutex::new(None),
@@ -200,7 +200,7 @@ impl BedrockClient {
     ///
     /// * `packet`: A reference to a packet object implementing the `ClientPacket` trait.
     pub async fn enqueue_packet_data(&self, packet_data: Bytes) {
-        if let Err(err) = self.outgoing_packet_queue_send.send(packet_data).await {
+        if let Err(err) = self.outgoing_packet_queue_send.send(packet_data) {
             // This is expected to fail if we are closed
             if !self.is_closed() {
                 error!("Failed to add packet to the outgoing packet queue for client: {err}");
