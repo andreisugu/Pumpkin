@@ -47,7 +47,6 @@ use pumpkin_util::math::{
 };
 use pumpkin_util::text::TextComponent;
 use pumpkin_util::text::hover::HoverEvent;
-use pumpkin_util::version::MinecraftVersion;
 use pumpkin_world::item::ItemStack;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -716,9 +715,14 @@ impl Entity {
     }
 
     pub async fn send_head_rot(&self, head_yaw: u8) {
+        let pos = self.pos.load();
         self.world
             .load()
-            .broadcast_packet_all(&CHeadRot::new(self.entity_id.into(), head_yaw))
+            .broadcast_packet_nearby(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CHeadRot::new(self.entity_id.into(), head_yaw),
+            )
             .await;
     }
 
@@ -1055,13 +1059,17 @@ impl Entity {
 
         self.world
             .load()
-            .broadcast_packet_all(&CUpdateEntityPosRot::new(
-                self.entity_id.into(),
-                Vector3::new(converted.x, converted.y, converted.z),
-                yaw,
-                pitch as u8,
-                self.on_ground.load(Relaxed),
-            ))
+            .broadcast_packet_nearby(
+                &new,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CUpdateEntityPosRot::new(
+                    self.entity_id.into(),
+                    Vector3::new(converted.x, converted.y, converted.z),
+                    yaw,
+                    pitch as u8,
+                    self.on_ground.load(Relaxed),
+                ),
+            )
             .await;
         self.send_head_rot(yaw).await;
     }
@@ -1086,11 +1094,15 @@ impl Entity {
 
         self.world
             .load()
-            .broadcast_packet_all(&CUpdateEntityPos::new(
-                self.entity_id.into(),
-                Vector3::new(converted.x, converted.y, converted.z),
-                self.on_ground.load(Relaxed),
-            ))
+            .broadcast_packet_nearby(
+                &new,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CUpdateEntityPos::new(
+                    self.entity_id.into(),
+                    Vector3::new(converted.x, converted.y, converted.z),
+                    self.on_ground.load(Relaxed),
+                ),
+            )
             .await;
     }
 
@@ -2068,13 +2080,15 @@ impl Entity {
     }
 
     pub async fn send_meta_data<T: Serialize>(&self, meta: &[Metadata<T>]) {
-        let mut buf = Vec::new();
-        for meta in meta {
-            meta.write(&mut buf, &MinecraftVersion::V_1_21_11).unwrap();
-        }
-        buf.put_u8(255);
+        let entity_pos = self.pos.load();
         let world = self.world.load();
         for player in world.players.load().iter() {
+            // Only send metadata to players within tracking distance
+            if player.position().squared_distance_to_vec(&entity_pos)
+                > World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ
+            {
+                continue;
+            }
             if let ClientPlatform::Java(client) = &player.client {
                 let mut buf = Vec::new();
                 for meta in meta {
@@ -2189,14 +2203,18 @@ impl Entity {
         }
         self.world
             .load()
-            .broadcast_packet_all(&CEntityPositionSync::new(
-                self.entity_id.into(),
-                position,
-                Vector3::new(0.0, 0.0, 0.0),
-                yaw.unwrap_or(self.yaw.load()),
-                pitch.unwrap_or(self.pitch.load()),
-                self.on_ground.load(Ordering::SeqCst),
-            ))
+            .broadcast_packet_nearby(
+                &position,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CEntityPositionSync::new(
+                    self.entity_id.into(),
+                    position,
+                    Vector3::new(0.0, 0.0, 0.0),
+                    yaw.unwrap_or(self.yaw.load()),
+                    pitch.unwrap_or(self.pitch.load()),
+                    self.on_ground.load(Ordering::SeqCst),
+                ),
+            )
             .await;
     }
 

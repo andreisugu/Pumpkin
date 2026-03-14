@@ -25,6 +25,7 @@ use crate::entity::attributes::ModifierOperation;
 use crate::entity::attributes::{AttributeInstance, DEFAULT_ATTRIBUTE_REGISTRY};
 use crate::entity::{EntityBaseFuture, NbtFuture};
 use crate::server::Server;
+use crate::world::World;
 use crate::world::loot::{LootContextParameters, LootTableExt};
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::attributes::Attributes;
@@ -184,10 +185,13 @@ impl LivingEntity {
                 )
             })
             .collect();
+        let pos = self.entity.pos.load();
         self.entity
             .world
             .load()
-            .broadcast_packet_except(
+            .broadcast_packet_nearby_except(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
                 &[self.entity.entity_uuid],
                 &CSetEquipment::new(self.entity_id().into(), equipment),
             )
@@ -196,15 +200,19 @@ impl LivingEntity {
 
     /// Picks up and Item entity or XP Orb
     pub async fn pickup(&self, item: &Entity, stack_amount: u32) {
-        // TODO: Only nearby
+        let pos = self.entity.pos.load();
         self.entity
             .world
             .load()
-            .broadcast_packet_all(&CTakeItemEntity::new(
-                item.entity_id.into(),
-                self.entity.entity_id.into(),
-                stack_amount.try_into().unwrap(),
-            ))
+            .broadcast_packet_nearby(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CTakeItemEntity::new(
+                    item.entity_id.into(),
+                    self.entity.entity_id.into(),
+                    stack_amount.try_into().unwrap(),
+                ),
+            )
             .await;
     }
 
