@@ -1352,11 +1352,13 @@ impl Player {
             )])
             .await;
 
+        let pos = self.living_entity.entity.pos.load();
         world
-            .broadcast_packet_all(&CEntityAnimation::new(
-                self.entity_id().into(),
-                Animation::LeaveBed,
-            ))
+            .broadcast_packet_nearby(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CEntityAnimation::new(self.entity_id().into(), Animation::LeaveBed),
+            )
             .await;
 
         self.sleeping_since.store(None);
@@ -1481,15 +1483,19 @@ impl Player {
             let chunk_count = chunk_of_chunks.len();
             match &self.client {
                 ClientPlatform::Java(java_client) => {
-                    java_client.send_packet_now(&CChunkBatchStart).await;
+                    // Use enqueue_packet (non-blocking) instead of send_packet_now to avoid
+                    // blocking the tick loop. send_packet_now waits for each packet to be
+                    // written and flushed to the network, which stalls the entire server tick
+                    // while chunk data is compressed and transmitted. This causes intermittent
+                    // stutters where clients receive no packets during the blocking period.
+                    // enqueue_packet queues packets for the outgoing task to batch and send
+                    // asynchronously, maintaining packet ordering within the queue.
+                    java_client.enqueue_packet(&CChunkBatchStart).await;
                     for chunk in chunk_of_chunks {
-                        // log::debug!("send chunk {:?}", chunk.position);
-                        // TODO: Can we check if we still need to send the chunk? Like if it's a fast moving
-                        // player or something.
-                        java_client.send_packet_now(&CChunkData(&chunk)).await;
+                        java_client.enqueue_packet(&CChunkData(&chunk)).await;
                     }
                     java_client
-                        .send_packet_now(&CChunkBatchEnd::new(chunk_count as u16))
+                        .enqueue_packet(&CChunkBatchEnd::new(chunk_count as u16))
                         .await;
                 }
                 ClientPlatform::Bedrock(bedrock_client) => {
@@ -2837,11 +2843,23 @@ impl Player {
         };
 
         let packet = CEntityAnimation::new(entity_id, animation);
+        let pos = self.living_entity.entity.pos.load();
         if all {
-            world.broadcast_packet_all(&packet).await;
+            world
+                .broadcast_packet_nearby(
+                    &pos,
+                    World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                    &packet,
+                )
+                .await;
         } else {
             world
-                .broadcast_packet_except(&[self.gameprofile.id], &packet)
+                .broadcast_packet_nearby_except(
+                    &pos,
+                    World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                    &[self.gameprofile.id],
+                    &packet,
+                )
                 .await;
         }
     }

@@ -1,5 +1,6 @@
 use super::{Entity, EntityBase, NBTStorage, living::LivingEntity};
 use crate::server::Server;
+use crate::world::World;
 use pumpkin_data::BlockDirection;
 use pumpkin_data::entity::EntityType;
 use pumpkin_protocol::java::client::play::CEntityVelocity;
@@ -121,7 +122,13 @@ impl ThrownItemEntity {
 
         // Send updated velocity to clients
         let packet = CEntityVelocity::new(entity.entity_id.into(), velocity);
-        world.broadcast_packet_all(&packet).await;
+        world
+            .broadcast_packet_nearby(
+                &new_pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &packet,
+            )
+            .await;
 
         // Calculate search box for collisions
         let search_box = BoundingBox::new(
