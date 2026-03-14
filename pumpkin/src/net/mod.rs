@@ -24,6 +24,7 @@ pub mod authentication;
 pub mod bedrock;
 pub mod java;
 pub mod lan_broadcast;
+pub mod packet_logger;
 mod proxy;
 pub mod query;
 pub mod rcon;

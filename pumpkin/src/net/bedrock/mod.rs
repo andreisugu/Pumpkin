@@ -1,3 +1,4 @@
+use crate::net::packet_logger;
 pub mod play;
 use std::{
     collections::HashMap,
@@ -200,6 +201,8 @@ impl BedrockClient {
     ///
     /// * `packet`: A reference to a packet object implementing the `ClientPacket` trait.
     pub async fn enqueue_packet_data(&self, packet_data: Bytes) {
+        // Log outgoing packet
+        crate::net::packet_logger::log_packet(&packet_data, "BedrockClient outgoing");
         if let Err(err) = self.outgoing_packet_queue_send.send(packet_data).await {
             // This is expected to fail if we are closed
             if !self.is_closed() {
