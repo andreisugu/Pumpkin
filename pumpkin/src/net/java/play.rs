@@ -272,9 +272,11 @@ impl JavaClient {
         if delta.length_squared() < 64.0 {
             return false;
         }
-        // Sync position with all other players.
+        // Sync position with nearby players only.
         world
-            .broadcast_packet_except(
+            .broadcast_packet_nearby_except(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
                 &[player.gameprofile.id],
                 &CEntityPositionSync::new(
                     entity_id.into(),
@@ -343,9 +345,11 @@ impl JavaClient {
 
                 // TODO: Warn when player moves to quickly
                 if !self.sync_position(player, world, pos, last_pos, entity.yaw.load(), entity.pitch.load(), packet.collision & FLAG_ON_GROUND != 0).await {
-                    // Send the new position to all other players.
+                    // Send the new position to nearby players only.
                     world
-                        .broadcast_packet_except(
+                        .broadcast_packet_nearby_except(
+                            &pos,
+                            World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
                             &[player.gameprofile.id],
                             &CUpdateEntityPos::new(
                                 player.entity_id().into(),
@@ -475,9 +479,11 @@ impl JavaClient {
                     .sync_position(player, &world, pos, last_pos, yaw, pitch, (packet.collision & FLAG_ON_GROUND) != 0)
                     .await
                 {
-                    // Send the new position to all other players.
+                    // Send the new position to nearby players only.
                     world
-                        .broadcast_packet_except(
+                        .broadcast_packet_nearby_except(
+                            &pos,
+                            World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
                             &[player.gameprofile.id],
                             &CUpdateEntityPosRot::new(
                                 entity_id.into(),
@@ -495,7 +501,9 @@ impl JavaClient {
                 }
 
                 world
-                    .broadcast_packet_except(
+                    .broadcast_packet_nearby_except(
+                        &pos,
+                        World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
                         &[player.gameprofile.id],
                         &CHeadRot::new(entity_id.into(), yaw as u8),
                     )
@@ -565,21 +573,32 @@ impl JavaClient {
             wrap_degrees(rotation.yaw) % 360.0,
             wrap_degrees(rotation.pitch),
         );
-        // Send the new position to all other players.
+        // Send the new rotation to nearby players only.
         let entity_id = entity.entity_id;
         let yaw = (entity.yaw.load() * 256.0 / 360.0).rem_euclid(256.0);
         let pitch = (entity.pitch.load() * 256.0 / 360.0).rem_euclid(256.0);
         // let head_yaw = modulus(entity.head_yaw * 256.0 / 360.0, 256.0);
 
+        let pos = entity.pos.load();
         let world = entity.world.load_full();
         let packet =
             CUpdateEntityRot::new(entity_id.into(), yaw as u8, pitch as u8, rotation.ground);
         world
-            .broadcast_packet_except(&[player.gameprofile.id], &packet)
+            .broadcast_packet_nearby_except(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &[player.gameprofile.id],
+                &packet,
+            )
             .await;
         let packet = CHeadRot::new(entity_id.into(), yaw as u8);
         world
-            .broadcast_packet_except(&[player.gameprofile.id], &packet)
+            .broadcast_packet_nearby_except(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &[player.gameprofile.id],
+                &packet,
+            )
             .await;
     }
 

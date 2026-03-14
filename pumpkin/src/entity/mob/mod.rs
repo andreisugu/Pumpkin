@@ -367,13 +367,18 @@ impl<T: Mob + Send + 'static> EntityBase for T {
 
             if yaw.abs_diff(last_yaw) >= 1 || pitch.abs_diff(last_pitch) >= 1 {
                 let world = entity.world.load();
+                let pos = entity.pos.load();
                 world
-                    .broadcast_packet_all(&CUpdateEntityRot::new(
-                        entity.entity_id.into(),
-                        yaw,
-                        pitch,
-                        entity.on_ground.load(Relaxed),
-                    ))
+                    .broadcast_packet_nearby(
+                        &pos,
+                        World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                        &CUpdateEntityRot::new(
+                            entity.entity_id.into(),
+                            yaw,
+                            pitch,
+                            entity.on_ground.load(Relaxed),
+                        ),
+                    )
                     .await;
                 mob_entity.last_sent_yaw.store(yaw, Relaxed);
                 mob_entity.last_sent_pitch.store(pitch, Relaxed);
@@ -381,8 +386,13 @@ impl<T: Mob + Send + 'static> EntityBase for T {
 
             if head_yaw.abs_diff(last_head_yaw) >= 1 {
                 let world = entity.world.load();
+                let pos = entity.pos.load();
                 world
-                    .broadcast_packet_all(&CHeadRot::new(entity.entity_id.into(), head_yaw))
+                    .broadcast_packet_nearby(
+                        &pos,
+                        World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                        &CHeadRot::new(entity.entity_id.into(), head_yaw),
+                    )
                     .await;
                 mob_entity.last_sent_head_yaw.store(head_yaw, Relaxed);
             }

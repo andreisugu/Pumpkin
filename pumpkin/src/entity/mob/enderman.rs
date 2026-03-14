@@ -6,6 +6,7 @@ use std::sync::{
 use crate::entity::attributes::AttributeBuilder;
 use crate::entity::attributes::Modifier;
 use crate::entity::attributes::ModifierOperation;
+use crate::world::World;
 use pumpkin_data::attributes::Attributes;
 use std::sync::LazyLock;
 use uuid::Uuid;
@@ -235,16 +236,20 @@ impl EndermanEntity {
         }
 
         entity.set_pos(new_pos);
-
+ 
         world
-            .broadcast_packet_all(&CEntityPositionSync::new(
-                entity.entity_id.into(),
-                new_pos,
-                Vector3::new(0.0, 0.0, 0.0),
-                entity.yaw.load(),
-                entity.pitch.load(),
-                entity.on_ground.load(Ordering::Relaxed),
-            ))
+            .broadcast_packet_nearby(
+                &new_pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CEntityPositionSync::new(
+                    entity.entity_id.into(),
+                    new_pos,
+                    Vector3::new(0.0, 0.0, 0.0),
+                    entity.yaw.load(),
+                    entity.pitch.load(),
+                    entity.on_ground.load(Ordering::Relaxed),
+                ),
+            )
             .await;
 
         self.mob_entity.navigator.lock().await.stop();

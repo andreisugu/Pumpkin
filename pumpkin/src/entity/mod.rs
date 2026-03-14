@@ -47,7 +47,6 @@ use pumpkin_util::math::{
 };
 use pumpkin_util::text::TextComponent;
 use pumpkin_util::text::hover::HoverEvent;
-use pumpkin_util::version::MinecraftVersion;
 use pumpkin_world::item::ItemStack;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -601,9 +600,14 @@ impl Entity {
 
     pub async fn send_velocity(&self) {
         let velocity = self.velocity.load();
+        let pos = self.pos.load();
         self.world
             .load()
-            .broadcast_packet_all(&CEntityVelocity::new(self.entity_id.into(), velocity))
+            .broadcast_packet_nearby(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CEntityVelocity::new(self.entity_id.into(), velocity),
+            )
             .await;
     }
 
@@ -702,23 +706,33 @@ impl Entity {
 
         let pitch = (pitch * 256.0 / 360.0).rem_euclid(256.0);
 
+        let pos = self.pos.load();
         self.world
             .load()
-            .broadcast_packet_all(&CUpdateEntityRot::new(
-                self.entity_id.into(),
-                yaw,
-                pitch as u8,
-                self.on_ground.load(Relaxed),
-            ))
+            .broadcast_packet_nearby(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CUpdateEntityRot::new(
+                    self.entity_id.into(),
+                    yaw,
+                    pitch as u8,
+                    self.on_ground.load(Relaxed),
+                ),
+            )
             .await;
 
         self.send_head_rot(yaw).await;
     }
 
     pub async fn send_head_rot(&self, head_yaw: u8) {
+        let pos = self.pos.load();
         self.world
             .load()
-            .broadcast_packet_all(&CHeadRot::new(self.entity_id.into(), head_yaw))
+            .broadcast_packet_nearby(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CHeadRot::new(self.entity_id.into(), head_yaw),
+            )
             .await;
     }
 
@@ -1055,13 +1069,17 @@ impl Entity {
 
         self.world
             .load()
-            .broadcast_packet_all(&CUpdateEntityPosRot::new(
-                self.entity_id.into(),
-                Vector3::new(converted.x, converted.y, converted.z),
-                yaw,
-                pitch as u8,
-                self.on_ground.load(Relaxed),
-            ))
+            .broadcast_packet_nearby(
+                &new,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CUpdateEntityPosRot::new(
+                    self.entity_id.into(),
+                    Vector3::new(converted.x, converted.y, converted.z),
+                    yaw,
+                    pitch as u8,
+                    self.on_ground.load(Relaxed),
+                ),
+            )
             .await;
         self.send_head_rot(yaw).await;
     }
@@ -1086,11 +1104,15 @@ impl Entity {
 
         self.world
             .load()
-            .broadcast_packet_all(&CUpdateEntityPos::new(
-                self.entity_id.into(),
-                Vector3::new(converted.x, converted.y, converted.z),
-                self.on_ground.load(Relaxed),
-            ))
+            .broadcast_packet_nearby(
+                &new,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CUpdateEntityPos::new(
+                    self.entity_id.into(),
+                    Vector3::new(converted.x, converted.y, converted.z),
+                    self.on_ground.load(Relaxed),
+                ),
+            )
             .await;
     }
 
@@ -2068,13 +2090,15 @@ impl Entity {
     }
 
     pub async fn send_meta_data<T: Serialize>(&self, meta: &[Metadata<T>]) {
-        let mut buf = Vec::new();
-        for meta in meta {
-            meta.write(&mut buf, &MinecraftVersion::V_1_21_11).unwrap();
-        }
-        buf.put_u8(255);
+        let entity_pos = self.pos.load();
         let world = self.world.load();
         for player in world.players.load().iter() {
+            // Only send metadata to players within tracking distance
+            if player.position().squared_distance_to_vec(&entity_pos)
+                > World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ
+            {
+                continue;
+            }
             if let ClientPlatform::Java(client) = &player.client {
                 let mut buf = Vec::new();
                 for meta in meta {
@@ -2189,14 +2213,18 @@ impl Entity {
         }
         self.world
             .load()
-            .broadcast_packet_all(&CEntityPositionSync::new(
-                self.entity_id.into(),
-                position,
-                Vector3::new(0.0, 0.0, 0.0),
-                yaw.unwrap_or(self.yaw.load()),
-                pitch.unwrap_or(self.pitch.load()),
-                self.on_ground.load(Ordering::SeqCst),
-            ))
+            .broadcast_packet_nearby(
+                &position,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CEntityPositionSync::new(
+                    self.entity_id.into(),
+                    position,
+                    Vector3::new(0.0, 0.0, 0.0),
+                    yaw.unwrap_or(self.yaw.load()),
+                    pitch.unwrap_or(self.pitch.load()),
+                    self.on_ground.load(Ordering::SeqCst),
+                ),
+            )
             .await;
     }
 
@@ -2247,8 +2275,13 @@ impl Entity {
             .collect();
 
         let world = self.world.load();
+        let pos = self.pos.load();
         world
-            .broadcast_packet_all(&CSetPassengers::new(VarInt(self.entity_id), &passenger_ids))
+            .broadcast_packet_nearby(
+                &pos,
+                World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                &CSetPassengers::new(VarInt(self.entity_id), &passenger_ids),
+            )
             .await;
     }
 
@@ -2306,13 +2339,25 @@ impl Entity {
             // then broadcasts to other players separately.
             let world = self.world.load();
             let passengers_packet = CSetPassengers::new(VarInt(self.entity_id), &passenger_ids);
+            let pos = self.pos.load();
             if let Some(player) = passenger.get_player() {
                 player.client.enqueue_packet(&passengers_packet).await;
                 world
-                    .broadcast_packet_except(&[player.gameprofile.id], &passengers_packet)
+                    .broadcast_packet_nearby_except(
+                        &pos,
+                        World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                        &[player.gameprofile.id],
+                        &passengers_packet,
+                    )
                     .await;
             } else {
-                world.broadcast_packet_all(&passengers_packet).await;
+                world
+                    .broadcast_packet_nearby(
+                        &pos,
+                        World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                        &passengers_packet,
+                    )
+                    .await;
             }
 
             // Calculate dismount offset (vanilla getPassengerDismountOffset)
@@ -2429,8 +2474,13 @@ impl Entity {
         } else {
             // No passenger was removed, still need to broadcast the passenger list
             let world = self.world.load();
+            let pos = self.pos.load();
             world
-                .broadcast_packet_all(&CSetPassengers::new(VarInt(self.entity_id), &passenger_ids))
+                .broadcast_packet_nearby(
+                    &pos,
+                    World::DEFAULT_ENTITY_TRACKING_DISTANCE_SQ,
+                    &CSetPassengers::new(VarInt(self.entity_id), &passenger_ids),
+                )
                 .await;
         }
     }
