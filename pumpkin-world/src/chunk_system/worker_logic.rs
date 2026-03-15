@@ -11,6 +11,7 @@ use itertools::Itertools;
 use pumpkin_config::lighting::LightingEngineConfig;
 use pumpkin_data::chunk::ChunkStatus;
 use pumpkin_data::chunk_gen_settings::GenerationSettings;
+use rayon::prelude::*;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
@@ -29,6 +30,9 @@ pub enum RecvChunk {
 /// Checks if a chunk needs relighting based on the current lighting configuration
 /// Returns true if the chunk has uniform lighting (from full/dark mode) but the server
 /// is now running in default mode (which needs proper lighting calculation)
+/// Checks if a chunk needs relighting based on the current lighting configuration
+/// Returns true if the chunk has uniform lighting (from full/dark mode) but the server
+/// is now running in default mode (which needs proper lighting calculation)
 fn needs_relighting(chunk: &crate::chunk::ChunkData, config: &LightingEngineConfig) -> bool {
     if *config != LightingEngineConfig::Default {
         return false;
@@ -41,17 +45,26 @@ fn needs_relighting(chunk: &crate::chunk::ChunkData, config: &LightingEngineConf
 
     let engine = chunk.light_engine.lock().expect("Mutex poisoned");
 
-    // Scan for any complex lighting data
-    let has_complex_light = engine.sky_light.iter().any(|lc| match lc {
-        LightContainer::Full(data) => data.iter().any(|&b| b != 0x00 && b != 0xFF),
-        LightContainer::Empty(val) => *val != 0 && *val != 15,
+    // SMARTER HEURISTIC: Check if light has actually propagated horizontally (values 1-14).
+    // If a chunk only has 0 and 15, it's just straight-down sunbeams (broken horizontal light).
+    let has_propagated_light = engine.sky_light.iter().any(|lc| match lc {
+        LightContainer::Full(data) => data.iter().any(|&b| {
+            let low = b & 0x0F;
+            let high = (b >> 4) & 0x0F;
+            (low > 0 && low < 15) || (high > 0 && high < 15)
+        }),
+        LightContainer::Empty(val) => *val > 0 && *val < 15,
     }) || engine.block_light.iter().any(|lc| match lc {
-        LightContainer::Full(data) => data.iter().any(|&b| b != 0x00 && b != 0xFF),
-        LightContainer::Empty(val) => *val != 0 && *val != 15,
+        LightContainer::Full(data) => data.iter().any(|&b| {
+            let low = b & 0x0F;
+            let high = (b >> 4) & 0x0F;
+            (low > 0 && low < 15) || (high > 0 && high < 15)
+        }),
+        LightContainer::Empty(val) => *val > 0 && *val < 15,
     });
 
-    // If it has complex light, we don't need to relight.
-    !has_complex_light
+    // If it HAS NOT propagated properly, it needs a relight!
+    !has_propagated_light
 }
 
 pub async fn io_read_work(
@@ -68,13 +81,17 @@ pub async fn io_read_work(
 
     // Cleaner loop and async recv
     while let Ok(pos) = recv.recv().await {
-        // Lock handling
-        tokio::task::block_in_place(|| {
-            let mut data = lock.0.lock().unwrap();
-            while data.contains_key(&pos) {
-                data = lock.1.wait(data).unwrap();
+        // --- ASYNC LOCK WAIT ---
+        loop {
+            let is_locked = {
+                let data = lock.0.lock().unwrap();
+                data.contains_key(&pos)
+            };
+            if !is_locked {
+                break;
             }
-        });
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
 
         level
             .chunk_saver
@@ -88,61 +105,51 @@ pub async fn io_read_work(
 
         match data {
             Loaded(chunk) => {
-                if chunk.status == ChunkStatus::Full {
-                    // Relighting check
-                    let needs_relight = needs_relighting(&chunk, &level.lighting_config);
+                let level_clone = level.clone();
+                let is_full = chunk.status == ChunkStatus::Full;
+                let (rayon_tx, rayon_rx) = tokio::sync::oneshot::channel();
 
-                    if needs_relight {
-                        debug!(
-                            "Chunk {pos:?} has uniform lighting, downgrading to Features stage for relighting"
-                        );
-
-                        // Create ProtoChunk using the async method
-                        let mut proto = ProtoChunk::from_chunk_data(
-                            &chunk,
-                            dimension,
-                            level.world_gen.default_block,
-                            biome_mixer_seed,
-                        );
-
-                        // Clear all lighting data
-                        let section_count = proto.light.sky_light.len();
-                        proto.light.sky_light = (0..section_count)
-                            .map(|_| LightContainer::new_empty(0))
-                            .collect();
-                        proto.light.block_light = (0..section_count)
-                            .map(|_| LightContainer::new_empty(0))
-                            .collect();
-
-                        // Set stage to Features
-                        proto.stage = StagedChunkEnum::Features;
-
-                        if send
-                            .send((pos, RecvChunk::IO(Chunk::Proto(Box::new(proto)))))
-                            .is_err()
-                        {
-                            break;
+                // CPU WORK -> RAYON
+                rayon::spawn(move || {
+                    let processed = if is_full {
+                        if needs_relighting(&chunk, &level_clone.lighting_config) {
+                            let mut proto = ProtoChunk::from_chunk_data(
+                                &chunk,
+                                &level_clone.world_gen.dimension,
+                                level_clone.world_gen.default_block,
+                                biome_mixer_seed,
+                            );
+                            let sc = proto.light.sky_light.len();
+                            proto.light.sky_light =
+                                (0..sc).map(|_| LightContainer::new_empty(0)).collect();
+                            proto.light.block_light =
+                                (0..sc).map(|_| LightContainer::new_empty(0)).collect();
+                            proto.stage = StagedChunkEnum::Features;
+                            RecvChunk::IO(Chunk::Proto(Box::new(proto)))
+                        } else {
+                            RecvChunk::IO(Chunk::Level(chunk))
                         }
                     } else {
-                        // Send fully valid chunk
-                        if send
-                            .send((pos, RecvChunk::IO(Chunk::Level(chunk))))
-                            .is_err()
-                        {
-                            break;
-                        }
+                        RecvChunk::IO(Chunk::Proto(Box::new(ProtoChunk::from_chunk_data(
+                            &chunk,
+                            &level_clone.world_gen.dimension,
+                            level_clone.world_gen.default_block,
+                            biome_mixer_seed,
+                        ))))
+                    };
+                    let _ = rayon_tx.send(processed);
+                });
+
+                let processed_chunk = rayon_rx.await.expect("Rayon worker died");
+
+                if let RecvChunk::IO(Chunk::Proto(_)) = &processed_chunk {
+                    if is_full {
+                        debug!("Chunk {pos:?} relighting triggered");
                     }
-                } else {
-                    // Standard ProtoChunk handling for non-full chunks
-                    let val = RecvChunk::IO(Chunk::Proto(Box::new(ProtoChunk::from_chunk_data(
-                        &chunk,
-                        dimension,
-                        level.world_gen.default_block,
-                        biome_mixer_seed,
-                    ))));
-                    if send.send((pos, val)).is_err() {
-                        break;
-                    }
+                }
+
+                if send.send((pos, processed_chunk)).is_err() {
+                    break;
                 }
                 continue;
             }
@@ -151,7 +158,6 @@ pub async fn io_read_work(
                 warn!("chunk data read error pos: {pos:?}. regenerating");
             }
         }
-
         // Final send for missing/error cases (regenerate)
         if send
             .send((
@@ -174,54 +180,65 @@ pub async fn io_read_work(
 
 pub async fn io_write_work(recv: AsyncRx<Vec<(ChunkPos, Chunk)>>, level: Arc<Level>, lock: IOLock) {
     loop {
-        // Don't check cancel_token here (keep saving chunks)
         let data = match recv.recv().await {
             Ok(d) => d,
             Err(_) => break,
         };
-        // debug!("io write thread receive chunks size {}", data.len());
-        let mut vec = Vec::with_capacity(data.len());
-        for (pos, chunk) in data {
-            match chunk {
-                Chunk::Level(chunk) => vec.push((pos, chunk)),
-                Chunk::Proto(chunk) => {
-                    let mut temp = Chunk::Proto(chunk);
-                    temp.upgrade_to_level_chunk(&level.world_gen.dimension, &level.lighting_config);
-                    let Chunk::Level(chunk) = temp else { panic!() };
-                    vec.push((pos, chunk));
-                }
-            }
-        }
+
+        let level_clone = level.clone();
+        let (rayon_tx, rayon_rx) = tokio::sync::oneshot::channel();
+
+        // PARALLEL COMPUTE -> RAYON
+        rayon::spawn(move || {
+            let processed_vec: Vec<_> = data
+                .into_par_iter()
+                .map(|(pos, chunk)| match chunk {
+                    Chunk::Level(chunk) => (pos, chunk),
+                    Chunk::Proto(chunk) => {
+                        let mut temp = Chunk::Proto(chunk);
+                        temp.upgrade_to_level_chunk(
+                            &level_clone.world_gen.dimension,
+                            &level_clone.lighting_config,
+                        );
+                        let Chunk::Level(chunk) = temp else {
+                            panic!("Upgrade failed")
+                        };
+                        (pos, chunk)
+                    }
+                })
+                .collect();
+            let _ = rayon_tx.send(processed_vec);
+        });
+
+        let vec = rayon_rx.await.expect("Rayon write-prep failed");
         let pos = vec.iter().map(|(pos, _)| *pos).collect_vec();
+
         if let Err(e) = level
             .chunk_saver
             .save_chunks(&level.level_folder, vec)
             .await
         {
-            error!("Failed to save chunks: {:?}", e);
+            error!("Save error: {:?}", e);
         }
 
-        for i in pos {
+        // BATCHED LOCK RELEASE (Thread-Safe)
+        let mut needs_notify = false;
+        {
             let mut data = lock.0.lock().unwrap();
-            match data.entry(i) {
-                Entry::Occupied(mut entry) => {
+            for i in pos {
+                if let Entry::Occupied(mut entry) = data.entry(i) {
                     let rc = entry.get_mut();
                     if *rc == 1 {
                         entry.remove();
-                        drop(data);
-                        lock.1.notify_all();
+                        needs_notify = true;
                     } else {
                         *rc -= 1;
                     }
                 }
-                Entry::Vacant(_) => {
-                    warn!(
-                        "io_write: attempted to release missing lock entry for {:?}",
-                        i
-                    );
-                    // continue without panicking to avoid crashing on shutdown races
-                }
             }
+        }
+        if needs_notify {
+            lock.1.notify_all();
         }
     }
 }

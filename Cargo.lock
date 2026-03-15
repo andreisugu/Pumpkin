@@ -2873,6 +2873,7 @@ dependencies = [
  "pumpkin-nbt",
  "pumpkin-util",
  "rand 0.10.0",
+ "rayon",
  "rustc-hash",
  "ruzstd",
  "serde",

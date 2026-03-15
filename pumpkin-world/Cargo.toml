@@ -53,6 +53,7 @@ num_cpus.workspace = true
 rustc-hash.workspace = true
 slotmap.workspace = true
 crossfire.workspace = true
+rayon.workspace = true
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports", "async_tokio"] }
