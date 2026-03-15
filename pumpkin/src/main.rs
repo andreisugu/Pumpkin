@@ -45,8 +45,32 @@ const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 // WARNING: All rayon calls from the tokio runtime must be non-blocking! This includes things
 // like `par_iter`. These should be spawned in the the rayon pool and then passed to the tokio
 // runtime with a channel! See `Level::fetch_chunks` as an example!
-#[tokio::main]
-async fn main() {
+fn main() {
+    let total_cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let reserved = (total_cores / 4).clamp(1, 4);
+    let rayon_threads = (total_cores - reserved).max(1);
+
+    // 1. Setup Rayon first
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(rayon_threads)
+        .thread_name(|i| format!("rayon-worker-{}", i))
+        .build_global()
+        .unwrap();
+
+    // 2. Build a CUSTOM Tokio runtime with "Global Fairness"
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .global_queue_interval(31)
+        .worker_threads(reserved.max(2))
+        .build()
+        .unwrap();
+
+    runtime.block_on(async_main());
+}
+
+async fn async_main() {
+    tracing::info!("Server starting with Global Fairness enabled...");
+
     #[cfg(feature = "console-subscriber")]
     console_subscriber::init();
     let time = Instant::now();
@@ -64,8 +88,6 @@ async fn main() {
     let default_panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         default_panic(info);
-        // TODO: Gracefully exit?
-        // We need to abide by the panic rules here.
         std::process::exit(1);
     }));
     info!(

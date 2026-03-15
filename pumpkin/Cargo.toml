@@ -16,6 +16,7 @@ LegalCopyright = "Copyright © 2026 Aleksander Medvedev"
 doctest = false
 
 [dependencies]
+rayon.workspace = true
 # pumpkin
 arc-swap.workspace = true
 pumpkin-util.workspace = true
@@ -97,6 +98,7 @@ tracing-serde-structured = { workspace = true }
 
 [dev-dependencies]
 tempfile.workspace = true
+
 
 [features]
 console-subscriber = ["dep:console-subscriber"]
