@@ -21,6 +21,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
+use crate::health::{HEALTH, mark_tick};
 use tracing::{debug, error, info, trace, warn};
 
 pub(crate) struct TaskHeapNode(i8, NodeKey);
@@ -903,6 +904,8 @@ impl GenerationSchedule {
             thread::current().name().unwrap_or("unknown")
         );
         loop {
+            std::thread::yield_now();
+            mark_tick(&HEALTH.scheduler_tick);
             if level.should_unload.swap(false, Relaxed) {
                 self.unload_chunk();
             }

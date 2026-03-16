@@ -1,3 +1,4 @@
+pub mod health;
 use pumpkin_data::{
     Block, BlockState, chunk_gen_settings::GenerationSettings, dimension::Dimension,
 };

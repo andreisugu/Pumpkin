@@ -47,19 +47,37 @@ const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 // runtime with a channel! See `Level::fetch_chunks` as an example!
 #[tokio::main]
 async fn main() {
+
+    // 1. Load configs and start the logger FIRST so tracing::info works
+    let exec_dir = std::env::current_dir().unwrap();
+    let config_dir = exec_dir.join("config");
+    let basic_config = BasicConfiguration::load(&config_dir);
+    let advanced_config = AdvancedConfiguration::load(&config_dir);
+    pumpkin::init_logger(&advanced_config);
+
+    // 2. Start the EKG watchdog thread (it uses eprintln! so it doesn't strictly need the logger, but it's good here)
+    pumpkin_world::health::spawn_watchdog();
+
     #[cfg(feature = "console-subscriber")]
     console_subscriber::init();
     let time = Instant::now();
 
-    let exec_dir = std::env::current_dir().unwrap();
-    let config_dir = exec_dir.join("config");
+    // 3. Setup Rayon and print the stats!
+    let total_cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let reserved = if total_cores > 8 { total_cores / 2 } else { 2 };
+    let rayon_threads = (total_cores - reserved).max(1);
 
-    let basic_config = BasicConfiguration::load(&config_dir);
-    let advanced_config = AdvancedConfiguration::load(&config_dir);
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(rayon_threads)
+        .thread_name(|i| format!("rayon-worker-{}", i))
+        .build_global()
+        .unwrap_or_else(|_| {
+            tracing::warn!("Rayon global pool already initialized");
+        });
+
+    tracing::info!("CPU Cores: {}, Rayon Workers: {}, System Reserved: {}", total_cores, rayon_threads, reserved);
 
     let vanilla_data = VanillaData::load();
-
-    pumpkin::init_logger(&advanced_config);
 
     let default_panic = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {

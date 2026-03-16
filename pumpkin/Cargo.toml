@@ -16,6 +16,8 @@ LegalCopyright = "Copyright © 2026 Aleksander Medvedev"
 doctest = false
 
 [dependencies]
+# For parallel chunk math and thread pool control
+rayon = "1.8"
 # pumpkin
 arc-swap.workspace = true
 pumpkin-util.workspace = true

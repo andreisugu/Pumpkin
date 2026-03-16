@@ -68,6 +68,7 @@ pub async fn io_read_work(
 
     // Cleaner loop and async recv
     while let Ok(pos) = recv.recv().await {
+        crate::health::mark_tick(&crate::health::HEALTH.io_read_tick);
         // Lock handling
         tokio::task::block_in_place(|| {
             let mut data = lock.0.lock().unwrap();
@@ -174,7 +175,7 @@ pub async fn io_read_work(
 
 pub async fn io_write_work(recv: AsyncRx<Vec<(ChunkPos, Chunk)>>, level: Arc<Level>, lock: IOLock) {
     loop {
-        // Don't check cancel_token here (keep saving chunks)
+        crate::health::mark_tick(&crate::health::HEALTH.io_write_tick);
         let data = match recv.recv().await {
             Ok(d) => d,
             Err(_) => break,
@@ -234,6 +235,7 @@ pub fn generation_work(
     let settings = GenerationSettings::from_dimension(&level.world_gen.dimension);
 
     loop {
+        crate::health::mark_tick(&crate::health::HEALTH.gen_tick);
         let (pos, mut cache, stage) = if let Ok(data) = recv.recv() {
             data
         } else {
