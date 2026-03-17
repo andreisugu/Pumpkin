@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 use std::{io::Write, sync::Arc};
+use crate::net::packet_logger;
 
 use bytes::Bytes;
 use crossbeam::atomic::AtomicCell;
@@ -270,6 +271,8 @@ impl JavaClient {
     ///
     /// * `packet`: A reference to a packet object implementing the `ClientPacket` trait.
     pub async fn enqueue_packet_data(&self, packet_data: Bytes) {
+        // Log outgoing packet
+        crate::net::packet_logger::log_packet(&packet_data, "JavaClient outgoing");
         if let Err(err) = self
             .outgoing_packet_queue_send
             .send(OutgoingPacket::normal(packet_data))
