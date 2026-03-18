@@ -325,6 +325,15 @@ impl ConfiguredFeature {
                 feature.generate(chunk, min_y, height, feature_name, random, pos)
             }
             Self::BasaltPillar(feature) => feature.generate(chunk, random, pos),
+            Self::BasaltColumns(feature) => feature.generate(
+                chunk,
+                block_registry,
+                min_y,
+                height,
+                feature_name,
+                random,
+                pos,
+            ),
             _ => false, // TODO
         }
     }
