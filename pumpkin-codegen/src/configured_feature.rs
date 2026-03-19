@@ -492,6 +492,7 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
         }
         "minecraft:glowstone_blob" => {
             quote! { ConfiguredFeature::GlowstoneBlob(crate::generation::feature::features::glowstone_blob::GlowstoneBlobFeature {}) }
+        }
         "minecraft:basalt_columns" => {
             let height = value_to_int_provider(&config["height"]);
             let reach = value_to_int_provider(&config["reach"]);
