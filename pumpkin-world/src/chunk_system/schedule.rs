@@ -636,57 +636,67 @@ impl GenerationSchedule {
     fn receive_chunk(&mut self, pos: ChunkPos, data: RecvChunk) {
         match data {
             RecvChunk::IO(chunk) => {
-                let mut holder = self.chunk_map.remove(&pos).unwrap();
-                if holder.chunk.is_some() {
+                // Safely attempt to get the holder to prevent a crash if the chunk unloaded during IO
+                if let Some(mut holder) = self.chunk_map.remove(&pos) {
+                    if holder.chunk.is_some() {
+                        warn!(
+                            "receive_chunk(IO): holder already has chunk at {:?}; replacing",
+                            pos
+                        );
+                    }
+                    debug_assert_eq!(holder.current_stage, StagedChunkEnum::None);
+
+                    for i in (holder.current_stage as usize + 1)..=(chunk.get_stage_id() as usize) {
+                        self.drop_node(holder.tasks[i]);
+                        holder.tasks[i] = NodeKey::null();
+                    }
+                    holder.current_stage = StagedChunkEnum::from(chunk.get_stage_id());
+
+                    if !holder.occupied.is_null() && self.graph.nodes.contains_key(holder.occupied)
+                    {
+                        self.drop_node(holder.occupied);
+                    }
+                    holder.occupied = NodeKey::null();
+
+                    match &chunk {
+                        Chunk::Level(data) => {
+                            self.apply_lighting_override(data);
+                            let result = self.public_chunk_map.insert(pos, data.clone());
+                            if result.is_some() {
+                                warn!(
+                                    "receive_chunk(IO): replacing existing public chunk at {:?}",
+                                    pos
+                                );
+                            }
+                            holder.public = true;
+                            trace!(
+                                "Notifying players: chunk {:?} loaded from disk (Full status)",
+                                pos
+                            );
+                            self.listener.process_new_chunk(pos, data);
+                        }
+                        Chunk::Proto(_) => {
+                            if holder.public {
+                                debug!(
+                                    "Chunk {:?} downgraded to Proto for relighting, marking as non-public",
+                                    pos
+                                );
+                                self.public_chunk_map.remove(&pos);
+                                holder.public = false;
+                            }
+                        }
+                    }
+                    holder.chunk = Some(chunk);
+                    self.chunk_map.insert(pos, holder);
+
+                    // A new chunk arrived — unblock any waiting generation tasks
+                    self.check_waiting_tasks();
+                } else {
                     warn!(
-                        "receive_chunk(IO): holder already has chunk at {:?}; replacing",
+                        "receive_chunk(IO): chunk {:?} unloaded while reading from disk, discarding",
                         pos
                     );
                 }
-                debug_assert_eq!(holder.current_stage, StagedChunkEnum::None);
-
-                for i in (holder.current_stage as usize + 1)..=(chunk.get_stage_id() as usize) {
-                    self.drop_node(holder.tasks[i]);
-                    holder.tasks[i] = NodeKey::null();
-                }
-                holder.current_stage = StagedChunkEnum::from(chunk.get_stage_id());
-                debug_assert!(self.graph.nodes.contains_key(holder.occupied));
-                self.drop_node(holder.occupied);
-                holder.occupied = NodeKey::null();
-
-                match &chunk {
-                    Chunk::Level(data) => {
-                        self.apply_lighting_override(data);
-                        let result = self.public_chunk_map.insert(pos, data.clone());
-                        if result.is_some() {
-                            warn!(
-                                "receive_chunk(IO): replacing existing public chunk at {:?}",
-                                pos
-                            );
-                        }
-                        holder.public = true;
-                        trace!(
-                            "Notifying players: chunk {:?} loaded from disk (Full status)",
-                            pos
-                        );
-                        self.listener.process_new_chunk(pos, data);
-                    }
-                    Chunk::Proto(_) => {
-                        if holder.public {
-                            debug!(
-                                "Chunk {:?} downgraded to Proto for relighting, marking as non-public",
-                                pos
-                            );
-                            self.public_chunk_map.remove(&pos);
-                            holder.public = false;
-                        }
-                    }
-                }
-                holder.chunk = Some(chunk);
-                self.chunk_map.insert(pos, holder);
-
-                // A new chunk arrived — unblock any waiting generation tasks
-                self.check_waiting_tasks();
             }
             RecvChunk::Generation(data) => {
                 let mut dx = 0;
@@ -893,7 +903,7 @@ impl GenerationSchedule {
                 }
             }
         }
-        self.running_task_count -= 1;
+        self.running_task_count = self.running_task_count.saturating_sub(1);
     }
 
     fn work(mut self, level: Arc<Level>) {
@@ -1094,21 +1104,35 @@ impl GenerationSchedule {
             "schedule: waiting for {} generation tasks to finish",
             self.running_task_count
         );
-        let mut wait_iterations = 0;
-        let max_wait_iterations = 100; // 5 seconds max wait
-        while self.running_task_count > 0 && wait_iterations < max_wait_iterations {
+        while (self.running_task_count > 0 || !self.waiting_for_chunks.is_empty())
+            && self.queue.is_empty()
+        {
             if let Ok((pos, data)) = self.recv_chunk.try_recv() {
                 self.receive_chunk(pos, data);
-                wait_iterations = 0;
-            } else {
-                wait_iterations += 1;
-                if wait_iterations % 20 == 0 {
-                    warn!(
-                        "Still waiting for {} tasks to complete (waited {}ms)",
-                        self.running_task_count,
-                        wait_iterations * 50
-                    );
+                // Poll for level changes
+                self.resort_work(self.send_level.get());
+
+                // IF TASKS WERE ADDED, BREAK OUT TO DISPATCH THEM
+                if !self.queue.is_empty() {
+                    break;
                 }
+            } else {
+                if level.shut_down_chunk_system.load(Relaxed) {
+                    break;
+                }
+
+                if self.resort_work(self.send_level.get()) {
+                    // BREAK INSTEAD OF SLEEPING SO WE CAN DISPATCH
+                    break;
+                }
+
+                self.check_waiting_tasks();
+
+                // IF WAITING TASKS TIMED OUT OR UNBLOCKED, BREAK TO DISPATCH THEM
+                if !self.queue.is_empty() {
+                    break;
+                }
+
                 thread::sleep(Duration::from_millis(50));
             }
         }
