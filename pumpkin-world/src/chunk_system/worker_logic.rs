@@ -106,7 +106,19 @@ pub async fn io_read_work(
 
         let data = match t_recv.recv().await {
             Some(res) => res,
-            None => break,
+            None => {
+                warn!("fetch_chunks failed to return data for {:?}", pos);
+                let _ = send.send((
+                    pos,
+                    RecvChunk::GenerationFailure {
+                        pos,
+                        stage: StagedChunkEnum::Empty,
+                        error: "IO fetch dropped without response".to_string(),
+                        cache: None,
+                    },
+                ));
+                continue; // DO NOT BREAK. Keep the thread alive!
+            }
         };
 
         match data {

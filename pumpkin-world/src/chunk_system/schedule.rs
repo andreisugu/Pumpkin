@@ -746,123 +746,126 @@ impl GenerationSchedule {
                     let new_pos = ChunkPos::new(data.x + dx, data.z + dy);
                     match chunk {
                         Chunk::Level(chunk) => {
-                            let mut holder = self.chunk_map.remove(&new_pos).unwrap();
-                            if new_pos == pos {
-                                if holder.current_stage != StagedChunkEnum::Lighting {
-                                    warn!(
-                                        "receive_chunk(Level): holder at {:?} for pos {:?} expected {:?}; aligning",
-                                        holder.current_stage,
-                                        new_pos,
-                                        StagedChunkEnum::Lighting
-                                    );
-                                    holder.current_stage = StagedChunkEnum::Lighting;
-                                }
-                                self.drop_node(holder.tasks[StagedChunkEnum::Full as usize]);
-                                holder.tasks[StagedChunkEnum::Full as usize] = NodeKey::null();
-                                if self.graph.nodes.contains_key(holder.occupied) {
-                                    self.drop_node(holder.occupied);
-                                }
-                                holder.current_stage = StagedChunkEnum::Full;
-
-                                let was_public = holder.public;
-
-                                if was_public {
-                                    self.apply_lighting_override(&chunk);
-                                    holder.chunk = Some(Chunk::Level(chunk.clone()));
-                                    self.public_chunk_map.insert(new_pos, chunk.clone());
-                                    info!(
-                                        "Notifying players: regenerated chunk at {:?} (was already public)",
-                                        new_pos
-                                    );
-                                    self.listener.process_new_chunk(new_pos, &chunk);
-                                } else {
-                                    self.apply_lighting_override(&chunk);
-                                    let public_chunk = chunk.clone();
-                                    holder.chunk = Some(Chunk::Level(chunk));
-                                    let result =
-                                        self.public_chunk_map.insert(new_pos, public_chunk);
-                                    holder.public = true;
-                                    if result.is_some() {
+                            // Safely attempt to get the holder. If it's gone, ignore it.
+                            if let Some(mut holder) = self.chunk_map.remove(&new_pos) {
+                                if new_pos == pos {
+                                    if holder.current_stage != StagedChunkEnum::Lighting {
                                         warn!(
-                                            "public_chunk_map.insert returned existing chunk for {new_pos:?}"
+                                            "receive_chunk(Level): holder at {:?} for pos {:?} expected {:?}; aligning",
+                                            holder.current_stage,
+                                            new_pos,
+                                            StagedChunkEnum::Lighting
                                         );
+                                        holder.current_stage = StagedChunkEnum::Lighting;
                                     }
-                                    if let Some(pc) = self.public_chunk_map.get(&new_pos) {
-                                        trace!(
-                                            "Notifying players: new chunk at {:?} (generation complete)",
+                                    self.drop_node(holder.tasks[StagedChunkEnum::Full as usize]);
+                                    holder.tasks[StagedChunkEnum::Full as usize] = NodeKey::null();
+                                    if self.graph.nodes.contains_key(holder.occupied) {
+                                        self.drop_node(holder.occupied);
+                                    }
+                                    holder.current_stage = StagedChunkEnum::Full;
+
+                                    let was_public = holder.public;
+
+                                    if was_public {
+                                        self.apply_lighting_override(&chunk);
+                                        holder.chunk = Some(Chunk::Level(chunk.clone()));
+                                        self.public_chunk_map.insert(new_pos, chunk.clone());
+                                        info!(
+                                            "Notifying players: regenerated chunk at {:?} (was already public)",
                                             new_pos
                                         );
-                                        self.listener.process_new_chunk(new_pos, &pc);
+                                        self.listener.process_new_chunk(new_pos, &chunk);
                                     } else {
-                                        error!(
-                                            "CRITICAL: Failed to retrieve chunk {:?} from public_chunk_map immediately after insert!",
-                                            new_pos
-                                        );
+                                        self.apply_lighting_override(&chunk);
+                                        let public_chunk = chunk.clone();
+                                        holder.chunk = Some(Chunk::Level(chunk));
+                                        let result =
+                                            self.public_chunk_map.insert(new_pos, public_chunk);
+                                        holder.public = true;
+                                        if result.is_some() {
+                                            warn!(
+                                                "public_chunk_map.insert returned existing chunk for {new_pos:?}"
+                                            );
+                                        }
+                                        if let Some(pc) = self.public_chunk_map.get(&new_pos) {
+                                            trace!(
+                                                "Notifying players: new chunk at {:?} (generation complete)",
+                                                new_pos
+                                            );
+                                            self.listener.process_new_chunk(new_pos, &pc);
+                                        } else {
+                                            error!(
+                                                "CRITICAL: Failed to retrieve chunk {:?} from public_chunk_map immediately after insert!",
+                                                new_pos
+                                            );
+                                        }
                                     }
+                                } else {
+                                    holder.chunk = Some(Chunk::Level(chunk));
                                 }
-                            } else {
-                                holder.chunk = Some(Chunk::Level(chunk));
-                            }
 
-                            if !holder.occupied.is_null()
-                                && self.graph.nodes.contains_key(holder.occupied)
-                            {
-                                self.drop_node(holder.occupied);
-                            }
-                            holder.occupied = NodeKey::null();
-
-                            // If this neighbor chunk was only loaded for a dependency and
-                            // is no longer needed, clear dependency_stage and queue unload.
-                            if holder.target_stage == StagedChunkEnum::None
-                                && new_pos != pos
-                                && holder.current_stage >= holder.dependency_stage
-                            {
-                                holder.dependency_stage = StagedChunkEnum::None;
-                                self.unload_chunks.insert(new_pos);
-                            }
-
-                            self.chunk_map.insert(new_pos, holder);
-                        }
-                        Chunk::Proto(chunk) => {
-                            let mut holder = self.chunk_map.remove(&new_pos).unwrap();
-
-                            let stage = chunk.stage_id();
-                            if stage < holder.tasks.len() as u8 {
-                                let task_idx = stage as usize;
-                                if !holder.tasks[task_idx].is_null() {
-                                    self.drop_node(holder.tasks[task_idx]);
-                                    holder.tasks[task_idx] = NodeKey::null();
-                                }
-                            }
-
-                            if new_pos == pos {
-                                debug_assert_ne!(holder.current_stage, StagedChunkEnum::None);
-                                if self.graph.nodes.contains_key(holder.occupied) {
-                                    self.drop_node(holder.occupied);
-                                }
-                                holder.current_stage = StagedChunkEnum::from(stage);
-                            } else {
-                                if holder.current_stage < StagedChunkEnum::from(stage) {
-                                    holder.current_stage = StagedChunkEnum::from(stage);
-                                }
                                 if !holder.occupied.is_null()
                                     && self.graph.nodes.contains_key(holder.occupied)
                                 {
                                     self.drop_node(holder.occupied);
                                 }
+                                holder.occupied = NodeKey::null();
 
-                                // Clear dependency_stage and queue unload if no longer needed
+                                // If this neighbor chunk was only loaded for a dependency and
+                                // is no longer needed, clear dependency_stage and queue unload.
                                 if holder.target_stage == StagedChunkEnum::None
+                                    && new_pos != pos
                                     && holder.current_stage >= holder.dependency_stage
                                 {
                                     holder.dependency_stage = StagedChunkEnum::None;
                                     self.unload_chunks.insert(new_pos);
                                 }
-                            }
 
-                            holder.occupied = NodeKey::null();
-                            holder.chunk = Some(Chunk::Proto(chunk));
-                            self.chunk_map.insert(new_pos, holder);
+                                self.chunk_map.insert(new_pos, holder);
+                            }
+                        }
+                        Chunk::Proto(chunk) => {
+                            // Safely attempt to get the holder.
+                            if let Some(mut holder) = self.chunk_map.remove(&new_pos) {
+                                let stage = chunk.stage_id();
+                                if stage < holder.tasks.len() as u8 {
+                                    let task_idx = stage as usize;
+                                    if !holder.tasks[task_idx].is_null() {
+                                        self.drop_node(holder.tasks[task_idx]);
+                                        holder.tasks[task_idx] = NodeKey::null();
+                                    }
+                                }
+
+                                if new_pos == pos {
+                                    debug_assert_ne!(holder.current_stage, StagedChunkEnum::None);
+                                    if self.graph.nodes.contains_key(holder.occupied) {
+                                        self.drop_node(holder.occupied);
+                                    }
+                                    holder.current_stage = StagedChunkEnum::from(stage);
+                                } else {
+                                    if holder.current_stage < StagedChunkEnum::from(stage) {
+                                        holder.current_stage = StagedChunkEnum::from(stage);
+                                    }
+                                    if !holder.occupied.is_null()
+                                        && self.graph.nodes.contains_key(holder.occupied)
+                                    {
+                                        self.drop_node(holder.occupied);
+                                    }
+
+                                    // Clear dependency_stage and queue unload if no longer needed
+                                    if holder.target_stage == StagedChunkEnum::None
+                                        && holder.current_stage >= holder.dependency_stage
+                                    {
+                                        holder.dependency_stage = StagedChunkEnum::None;
+                                        self.unload_chunks.insert(new_pos);
+                                    }
+                                }
+
+                                holder.occupied = NodeKey::null();
+                                holder.chunk = Some(Chunk::Proto(chunk));
+                                self.chunk_map.insert(new_pos, holder);
+                            }
                         }
                     }
                     dy += 1;
@@ -892,9 +895,26 @@ impl GenerationSchedule {
                     let mut dy = 0;
                     for chunk in cache.chunks {
                         let new_pos = ChunkPos::new(cache.x + dx, cache.z + dy);
+                        
+                        // Store the node ID here to avoid overlapping borrows
+                        let mut node_to_drop = NodeKey::null();
+
                         if let Some(holder) = self.chunk_map.get_mut(&new_pos) {
                             holder.chunk = Some(chunk);
+                            // Unlock the neighbor (save the ID to drop later)
+                            if !holder.occupied.is_null() {
+                                node_to_drop = holder.occupied;
+                                holder.occupied = NodeKey::null();
+                            }
+                        } // `holder`'s mutable borrow of `chunk_map` ends safely right here!
+
+                        // Now it is perfectly safe to borrow `self` again to update the graph
+                        if !node_to_drop.is_null() {
+                            if self.graph.nodes.contains_key(node_to_drop) {
+                                self.drop_node(node_to_drop);
+                            }
                         }
+
                         dy += 1;
                         if dy == cache.size {
                             dy = 0;
@@ -1017,6 +1037,7 @@ impl GenerationSchedule {
                         holder.occupied = occupy;
 
                         if self.io_read.send(node.pos).is_err() {
+                            self.running_task_count = self.running_task_count.saturating_sub(1);
                             info!("IO read thread closed, saving remaining chunks...");
                             self.save_all_chunk(true);
                             break 'out2;
