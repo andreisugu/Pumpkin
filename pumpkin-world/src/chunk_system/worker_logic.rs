@@ -23,6 +23,7 @@ pub enum RecvChunk {
         pos: ChunkPos,
         stage: StagedChunkEnum,
         error: String,
+        cache: Option<Cache>,
     },
 }
 
@@ -68,13 +69,35 @@ pub async fn io_read_work(
 
     // Cleaner loop and async recv
     while let Ok(pos) = recv.recv().await {
-        // Lock handling
-        tokio::task::block_in_place(|| {
-            let mut data = lock.0.lock().unwrap();
-            while data.contains_key(&pos) {
-                data = lock.1.wait(data).unwrap();
+        // Asynchronously wait for the lock using Tokio's Notify and Timeout
+        let lock_acquired = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            loop {
+                let notified = lock.1.notified();
+                {
+                    let data = lock.0.lock().unwrap();
+                    if !data.contains_key(&pos) {
+                        break;
+                    }
+                }
+                notified.await;
             }
-        });
+        })
+        .await
+        .is_ok();
+
+        if !lock_acquired {
+            warn!("io_read: timed out waiting for IO write lock on chunk {pos:?}, re-queuing");
+            let _ = send.send((
+                pos,
+                RecvChunk::GenerationFailure {
+                    pos,
+                    stage: StagedChunkEnum::Empty,
+                    error: "IO write lock timeout".to_string(),
+                    cache: None,
+                },
+            ));
+            continue;
+        }
 
         level
             .chunk_saver
@@ -209,7 +232,7 @@ pub async fn io_write_work(recv: AsyncRx<Vec<(ChunkPos, Chunk)>>, level: Arc<Lev
                     if *rc == 1 {
                         entry.remove();
                         drop(data);
-                        lock.1.notify_all();
+                        lock.1.notify_waiters();
                     } else {
                         *rc -= 1;
                     }
@@ -242,22 +265,24 @@ pub fn generation_work(
         };
 
         // Run generation with panic catching
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            cache.advance(
-                stage,
-                &level.lighting_config,
-                level.block_registry.as_ref(),
-                settings,
-                &level.world_gen.random_config,
-                &level.world_gen.terrain_cache,
-                &level.world_gen.base_router,
-                level.world_gen.dimension,
-            );
-            cache // Return cache on success
-        }));
+        let result = {
+            let cache_ref = &mut cache;
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                cache_ref.advance(
+                    stage,
+                    &level.lighting_config,
+                    level.block_registry.as_ref(),
+                    settings,
+                    &level.world_gen.random_config,
+                    &level.world_gen.terrain_cache,
+                    &level.world_gen.base_router,
+                    level.world_gen.dimension,
+                );
+            }))
+        };
 
         match result {
-            Ok(cache) => {
+            Ok(_) => {
                 if send.send((pos, RecvChunk::Generation(cache))).is_err() {
                     break;
                 }
@@ -266,11 +291,7 @@ pub fn generation_work(
                 let msg = payload
                     .downcast_ref::<&str>()
                     .copied()
-                    .or_else(|| {
-                        payload
-                            .downcast_ref::<String>()
-                            .map(std::string::String::as_str)
-                    })
+                    .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
                     .unwrap_or("Unknown panic payload");
 
                 error!("Chunk generation FAILED at {pos:?} ({stage:?}): {msg}");
@@ -282,6 +303,7 @@ pub fn generation_work(
                         pos,
                         stage,
                         error: msg.to_string(),
+                        cache: Some(cache), // Pass the rescued cache back
                     },
                 ));
             }

@@ -11,8 +11,8 @@ pub type HashSetType<K> = rustc_hash::FxHashSet<K>;
 pub type ChunkPos = pumpkin_util::math::vector2::Vector2<i32>;
 pub type ChunkLevel = HashMapType<ChunkPos, i8>;
 pub type IOLock = std::sync::Arc<(
-    std::sync::Mutex<HashMapType<ChunkPos, u8>>,
-    std::sync::Condvar,
+    std::sync::Mutex<HashMapType<ChunkPos, usize>>,
+    tokio::sync::Notify,
 )>;
 
 pub mod channel;

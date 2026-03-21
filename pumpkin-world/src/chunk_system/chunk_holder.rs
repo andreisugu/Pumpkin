@@ -15,6 +15,7 @@ pub struct ChunkHolder {
     pub occupied_by: EdgeKey,
     pub public: bool,
     pub tasks: [NodeKey; 10],
+    pub retry_count: u8,
 }
 
 impl Default for ChunkHolder {
@@ -28,6 +29,7 @@ impl Default for ChunkHolder {
             occupied_by: EdgeKey::null(),
             public: false,
             tasks: [NodeKey::null(); 10],
+            retry_count: 0,
         }
     }
 }
