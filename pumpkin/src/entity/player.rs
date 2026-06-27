@@ -4271,7 +4271,6 @@ impl NBTStorage for PlayerInventory {
                 }
             }
 
-            let mut equipment_compound = NbtCompound::new();
             for slot in self.equipment_slots.values() {
                 let stack_binding = self.entity_equipment.lock().await.get(slot);
                 let stack = stack_binding.lock().await;
@@ -4279,29 +4278,19 @@ impl NBTStorage for PlayerInventory {
                     let mut item_compound = NbtCompound::new();
                     stack.write_item_stack(&mut item_compound);
                     drop(stack);
-                    match slot {
-                        EquipmentSlot::OffHand(_) => {
-                            equipment_compound.put_compound("offhand", item_compound);
-                        }
-                        EquipmentSlot::Feet(_) => {
-                            equipment_compound.put_compound("feet", item_compound);
-                        }
-                        EquipmentSlot::Legs(_) => {
-                            equipment_compound.put_compound("legs", item_compound);
-                        }
-                        EquipmentSlot::Chest(_) => {
-                            equipment_compound.put_compound("chest", item_compound);
-                        }
-                        EquipmentSlot::Head(_) => {
-                            equipment_compound.put_compound("head", item_compound);
-                        }
-                        _ => {
-                            warn!("Invalid equipment slot for a player");
-                        }
-                    }
+
+                    let slot_nbt_byte = match slot {
+                        EquipmentSlot::Feet(_) => 100,
+                        EquipmentSlot::Legs(_) => 101,
+                        EquipmentSlot::Chest(_) => 102,
+                        EquipmentSlot::Head(_) => 103,
+                        EquipmentSlot::OffHand(_) => 150u8 as i8,
+                        _ => continue,
+                    };
+                    item_compound.put_byte("Slot", slot_nbt_byte);
+                    items.push(NbtTag::Compound(item_compound));
                 }
             }
-            nbt.put_compound("equipment", equipment_compound);
             nbt.put("Inventory", NbtTag::List(items));
         })
     }
@@ -4316,14 +4305,26 @@ impl NBTStorage for PlayerInventory {
                     if let Some(item_compound) = tag.extract_compound()
                         && let Some(slot_byte) = item_compound.get_byte("Slot")
                     {
-                        let slot = slot_byte as usize;
-                        if let Some(item_stack) = ItemStack::read_item_stack(item_compound) {
+                        let slot_index = (slot_byte as u8) as usize;
+                        let target_slot = match slot_index {
+                            0..=35 => Some(slot_index),
+                            100 => Some(36), // feet
+                            101 => Some(37), // legs
+                            102 => Some(38), // chest
+                            103 => Some(39), // head
+                            150 => Some(40), // offhand
+                            _ => None,
+                        };
+                        if let Some(slot) = target_slot
+                            && let Some(item_stack) = ItemStack::read_item_stack(item_compound)
+                        {
                             self.set_stack(slot, item_stack).await;
                         }
                     }
                 }
             }
 
+            // Fallback for legacy Pumpkin format ("equipment" compound)
             if let Some(equipment) = nbt.get_compound("equipment") {
                 if let Some(offhand) = equipment.get_compound("offhand")
                     && let Some(item_stack) = ItemStack::read_item_stack(offhand)

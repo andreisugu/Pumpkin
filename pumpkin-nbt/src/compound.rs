@@ -327,7 +327,7 @@ impl Display for NbtCompound {
             if i > 0 {
                 f.write_str(", ")?;
             }
-            write!(f, "{key}: {value}")?;
+            write!(f, "{}: {value}", escape_key(key))?;
         }
         f.write_str("}")
     }
@@ -343,7 +343,7 @@ impl Display for NbtTag {
             Self::Long(v) => write!(f, "{v}L"),
             Self::Float(v) => write!(f, "{v}f"),
             Self::Double(v) => write!(f, "{v}d"),
-            Self::String(v) => write!(f, "\"{v}\""), // TODO: Proper escaping needed for robust SNBT
+            Self::String(v) => write!(f, "{}", quote_and_escape(v)),
             Self::Compound(v) => write!(f, "{v}"),
             Self::ByteArray(v) => {
                 f.write_str("[B;")?;
@@ -388,3 +388,48 @@ impl Display for NbtTag {
         }
     }
 }
+
+/// Escapes a string to conform to Minecraft's SNBT rules (StringTag.quoteAndEscape)
+#[must_use]
+pub fn quote_and_escape(value: &str) -> String {
+    let mut quote_char = None;
+    for c in value.chars() {
+        if c == '"' || c == '\'' {
+            quote_char = Some(if c == '"' { '\'' } else { '"' });
+            break;
+        }
+    }
+    let q = quote_char.unwrap_or('"');
+
+    let mut result = String::with_capacity(value.len() + 2);
+    result.push(q);
+    for c in value.chars() {
+        if c == '\\' {
+            result.push('\\');
+            result.push('\\');
+        } else if c == q {
+            result.push('\\');
+            result.push(c);
+        } else {
+            result.push(c);
+        }
+    }
+    result.push(q);
+    result
+}
+
+fn is_simple_value(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '+' || c == '-')
+}
+
+fn escape_key(key: &str) -> String {
+    if is_simple_value(key) {
+        key.to_string()
+    } else {
+        quote_and_escape(key)
+    }
+}
+

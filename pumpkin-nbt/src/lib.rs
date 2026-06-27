@@ -971,5 +971,70 @@ mod test {
         assert_eq!(value, reconstructed);
     }
 
-    // TODO: More robust tests
+    #[test]
+    fn quote_and_escape_works() {
+        use crate::compound::quote_and_escape;
+        assert_eq!(quote_and_escape("hello"), "\"hello\"");
+        assert_eq!(quote_and_escape("steve\"s"), "'steve\"s'");
+        assert_eq!(quote_and_escape("steve's"), "\"steve's\"");
+        assert_eq!(quote_and_escape("both\"and'"), "'both\"and\\''");
+        assert_eq!(quote_and_escape("backslash\\test"), "\"backslash\\\\test\"");
+    }
+
+    #[test]
+    fn snbt_display() {
+        use crate::NbtTag;
+        // Simple key
+        let mut compound = NbtCompound::new();
+        compound.put("simple_key", NbtTag::String("value".into()));
+        assert_eq!(format!("{compound}"), "{simple_key: \"value\"}");
+
+        // Complex key requiring quotes
+        let mut compound2 = NbtCompound::new();
+        compound2.put("complex key!", NbtTag::String("value".into()));
+        assert_eq!(format!("{compound2}"), "{\"complex key!\": \"value\"}");
+    }
+
+    #[test]
+    fn thread_local_state_reset() {
+        use crate::deserializer::from_bytes;
+        use crate::serializer::to_bytes;
+        use serde::{Serialize, Deserialize};
+
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct MyStruct {
+            #[serde(serialize_with = "crate::nbt_byte_array")]
+            byte_array: Vec<u8>,
+        }
+
+        // 1. Serialize custom struct with NBT byte array
+        let original = MyStruct {
+            byte_array: vec![1, 2, 3],
+        };
+        let mut bytes = Vec::new();
+        to_bytes(&original, &mut bytes).unwrap();
+
+        // 2. Deserialize the custom struct. This will set list type thread-local state,
+        // and because it's a custom struct (not NbtTag), it does not call NbtTagVisitor::visit_seq
+        // to clear it out-of-band. The deserializer must reset it.
+        let deserialized: MyStruct = from_bytes(Cursor::new(&bytes)).unwrap();
+        assert_eq!(original, deserialized);
+
+        // 3. Immediately deserialize NbtTag from a standard list. If the thread-local state
+        // wasn't reset, NbtTagVisitor would mistake this List for a ByteArray, causing panic/error!
+        let mut list_bytes = Vec::new();
+        let list_tag = crate::NbtTag::List(vec![crate::NbtTag::Int(42)]);
+        // Wrap list in a root compound since NBT needs a root compound
+        let mut root = NbtCompound::new();
+        root.put("my_list", list_tag);
+        to_bytes(&root, &mut list_bytes).unwrap();
+
+        let reconstructed: NbtCompound = from_bytes(Cursor::new(&list_bytes)).unwrap();
+        if let Some(crate::NbtTag::List(items)) = reconstructed.get("my_list") {
+            assert_eq!(items.len(), 1);
+            assert!(matches!(items[0], crate::NbtTag::Int(42)));
+        } else {
+            panic!("Expected list tag!");
+        }
+    }
 }

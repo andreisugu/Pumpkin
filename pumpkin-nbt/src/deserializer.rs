@@ -341,7 +341,9 @@ impl<'de, R: NbtReadHelper> de::Deserializer<'de> for &mut Deserializer<R> {
                     de: self,
                     list_type,
                     remaining_values,
-                })?;
+                });
+                set_curr_visitor_seq_list_id(None);
+                let result = result?;
                 Ok(result)
             }
             COMPOUND_ID => visitor.visit_map(CompoundAccess { de: self }),
