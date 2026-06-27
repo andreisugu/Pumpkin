@@ -458,9 +458,10 @@ impl Inventory for PlayerInventory {
         Box::pin(async move {
             if slot < self.main_inventory.len() {
                 self.main_inventory[slot].clone()
-            } else {
-                let slot = self.equipment_slots.get(&slot).unwrap();
+            } else if let Some(slot) = self.equipment_slots.get(&slot) {
                 self.entity_equipment.lock().await.get(slot)
+            } else {
+                Arc::new(Mutex::new(ItemStack::EMPTY.clone()))
             }
         })
     }
@@ -472,13 +473,14 @@ impl Inventory for PlayerInventory {
                 let mut guard = self.main_inventory[slot].lock().await;
                 std::mem::swap(&mut removed, &mut *guard);
                 removed
-            } else {
-                let slot = self.equipment_slots.get(&slot).unwrap();
+            } else if let Some(slot) = self.equipment_slots.get(&slot) {
                 self.entity_equipment
                     .lock()
                     .await
                     .put(slot, ItemStack::EMPTY.clone())
                     .await
+            } else {
+                ItemStack::EMPTY.clone()
             }
         })
     }
@@ -487,9 +489,7 @@ impl Inventory for PlayerInventory {
         Box::pin(async move {
             if slot < self.main_inventory.len() {
                 split_stack(&self.main_inventory, slot, amount).await
-            } else {
-                let slot = self.equipment_slots.get(&slot).unwrap();
-
+            } else if let Some(slot) = self.equipment_slots.get(&slot) {
                 let equipment = self.entity_equipment.lock().await.get(slot);
                 let mut stack = equipment.lock().await;
 
@@ -497,6 +497,8 @@ impl Inventory for PlayerInventory {
                     return stack.split(amount);
                 }
 
+                ItemStack::EMPTY.clone()
+            } else {
                 ItemStack::EMPTY.clone()
             }
         })
