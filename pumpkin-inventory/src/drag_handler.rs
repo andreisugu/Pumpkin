@@ -117,7 +117,7 @@ impl DragHandler {
             MouseDragType::Left => {
                 let changing_slots = drag.possibly_changing_slots(&slots, carried_item.item.id);
                 let amount_of_slots = changing_slots.len();
-                
+
                 if amount_of_slots > 0 {
                     let amount_per_slot = carried_item.item_count / (amount_of_slots as u8);
                     let mut remaining = carried_item.item_count;
