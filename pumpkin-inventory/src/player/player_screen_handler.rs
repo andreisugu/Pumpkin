@@ -137,7 +137,7 @@ impl ScreenHandler for PlayerScreenHandler {
     fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
         Box::pin(async move {
             self.default_on_closed(player).await;
-            //TODO: this.craftingResultInventory.clear();
+            self.get_slot(0).set_stack(ItemStack::EMPTY.clone()).await;
             self.drop_inventory(player, self.crafting_inventory.clone())
                 .await;
         })

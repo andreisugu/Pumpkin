@@ -4833,6 +4833,10 @@ impl InventoryPlayer for Player {
         })
     }
 
+    fn has_disconnected(&self) -> bool {
+        self.client.closed()
+    }
+
     // Synchronous methods remain unchanged
     fn has_infinite_materials(&self) -> bool {
         self.gamemode.load() == GameMode::Creative

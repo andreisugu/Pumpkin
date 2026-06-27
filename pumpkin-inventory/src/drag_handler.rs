@@ -95,19 +95,17 @@ impl DragHandler {
                     drag.possibly_changing_slots(slots.as_ref(), carried_item.item.id);
                 changing_slots.into_iter().for_each(|slot| {
                     if carried_item.item_count != 0 {
-                        carried_item.item_count -= 1;
                         if let Some(stack) = &mut slots[slot] {
-                            // TODO: Check for stack max here
-                            if stack.item_count + 1 < stack.item.components.max_stack_size {
+                            if stack.item_count < stack.item.components.max_stack_size {
                                 stack.item_count += 1;
-                            } else {
-                                carried_item.item_count += 1;
+                                carried_item.item_count -= 1;
                             }
                         } else {
                             *slots[slot] = Some(ItemStack {
                                 item: carried_item.item.clone(),
                                 item_count: 1,
-                            })
+                            });
+                            carried_item.item_count -= 1;
                         }
                     }
                 });
@@ -117,32 +115,37 @@ impl DragHandler {
                 }
             }
             MouseDragType::Left => {
-                // TODO: Handle dragging a stack with a greater amount than the item allows as max unstackable.
-                // In that specific case, follow `MouseDragType::Right` behaviours instead!
-
                 let changing_slots = drag.possibly_changing_slots(&slots, carried_item.item.id);
                 let amount_of_slots = changing_slots.len();
-                let (amount_per_slot, remainder) = if amount_of_slots == 0 {
-                    // TODO: please work lol
-                    (1, 0)
-                } else {
-                    (
-                        carried_item.item_count.div_euclid(amount_of_slots as u8),
-                        carried_item.item_count.rem_euclid(amount_of_slots as u8),
-                    )
-                };
-                changing_slots.into_iter().for_each(|slot| {
-                    if let Some(stack) = slots[slot].as_mut() {
-                        debug_assert!(stack.item.id == carried_item.item.id);
-                        // TODO: Handle max stack size
-                        stack.item_count += amount_per_slot;
-                    }
-                });
+                
+                if amount_of_slots > 0 {
+                    let amount_per_slot = carried_item.item_count / (amount_of_slots as u8);
+                    let mut remaining = carried_item.item_count;
 
-                if remainder > 0 {
-                    carried_item.item_count = remainder;
-                } else {
-                    *maybe_carried_item = None
+                    for slot in changing_slots {
+                        if let Some(stack) = slots[slot].as_mut() {
+                            debug_assert!(stack.item.id == carried_item.item.id);
+                            let max_size = stack.item.components.max_stack_size;
+                            let new_count = (stack.item_count + amount_per_slot).min(max_size);
+                            let added = new_count - stack.item_count;
+                            stack.item_count = new_count;
+                            remaining -= added;
+                        } else {
+                            let max_size = carried_item.item.components.max_stack_size;
+                            let new_count = amount_per_slot.min(max_size);
+                            *slots[slot] = Some(ItemStack {
+                                item: carried_item.item.clone(),
+                                item_count: new_count,
+                            });
+                            remaining -= new_count;
+                        }
+                    }
+
+                    if remaining > 0 {
+                        carried_item.item_count = remaining;
+                    } else {
+                        *maybe_carried_item = None
+                    }
                 }
             }
         }

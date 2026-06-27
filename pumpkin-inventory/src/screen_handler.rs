@@ -132,6 +132,11 @@ pub trait InventoryPlayer: Send + Sync {
     /// Gets the player's inventory.
     fn get_inventory(&self) -> Arc<PlayerInventory>;
 
+    /// Checks if the player has disconnected.
+    fn has_disconnected(&self) -> bool {
+        false // Default implementation to avoid breaking other types
+    }
+
     /// Checks if the player has infinite materials (creative mode).
     fn has_infinite_materials(&self) -> bool;
 
@@ -204,11 +209,14 @@ pub trait InventoryPlayer: Send + Sync {
 /// Tries to insert the stack into the player's inventory first,
 /// and drops it in the world if there's no room.
 pub async fn offer_or_drop_stack(player: &dyn InventoryPlayer, stack: ItemStack) {
-    // TODO: Super weird disconnect logic in vanilla, investigate this later
-    player
-        .get_inventory()
-        .offer_or_drop_stack(stack, player)
-        .await;
+    if player.has_disconnected() {
+        player.drop_item(stack, false).await;
+    } else {
+        player
+            .get_inventory()
+            .offer_or_drop_stack(stack, player)
+            .await;
+    }
 }
 
 /// Type alias for async screen handler operations.
