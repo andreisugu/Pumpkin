@@ -192,6 +192,16 @@ pub trait InventoryPlayer: Send + Sync {
         stack: &'a ItemStack,
     ) -> PlayerFuture<'a, ()>;
 
+    /// Called when an item is equipped or unequipped from an equipment slot.
+    /// Implementations must update attribute modifiers and broadcast packets.
+    fn on_equip_item<'a>(
+        &'a self,
+        slot: &'a EquipmentSlot,
+        old_stack: ItemStack,
+        new_stack: ItemStack,
+    ) -> PlayerFuture<'a, ()>;
+
+
     /// Awards experience points to the player (used for furnace smelting, etc.)
     fn award_experience(&self, amount: i32) -> PlayerFuture<'_, ()>;
 
@@ -833,10 +843,27 @@ pub trait ScreenHandler: Send + Sync {
         player: &'a dyn InventoryPlayer,
     ) -> ScreenHandlerFuture<'a, ()> {
         Box::pin(async move {
+            let slots = self.get_behaviour().slots.clone();
+            let mut initial_stacks = Vec::with_capacity(slots.len());
+            for slot in &slots {
+                initial_stacks.push(slot.get_cloned_stack().await);
+            }
+
             self.internal_on_slot_click(slot_index, button, action_type, player)
                 .await;
+
+            for (i, slot) in slots.iter().enumerate() {
+                let old_stack = &initial_stacks[i];
+                let new_stack = slot.get_cloned_stack().await;
+                if !ItemStack::are_items_and_components_equal(old_stack, &new_stack)
+                    || old_stack.item_count != new_stack.item_count
+                {
+                    slot.on_equipped(player, old_stack.clone(), new_stack).await;
+                }
+            }
         })
     }
+
 
     /// Internal slot click handling implementation.
     ///

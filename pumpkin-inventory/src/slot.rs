@@ -155,6 +155,18 @@ pub trait Slot: Send + Sync {
         })
     }
 
+    /// Callback for when an item is equipped or unequipped in this slot.
+    /// Used for equipment/offhand slots to trigger attribute updates.
+    fn on_equipped<'a>(
+        &'a self,
+        _player: &'a dyn InventoryPlayer,
+        _old_stack: ItemStack,
+        _new_stack: ItemStack,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
+
     /// Sets the stack without calling callbacks.
     fn set_stack_no_callbacks(&self, stack: ItemStack) -> BoxFuture<'_, ()> {
         // Default implementation logic:
@@ -376,6 +388,63 @@ impl Slot for NormalSlot {
     }
 }
 
+/// An off-hand equipment slot.
+pub struct OffHandSlot {
+    /// The inventory containing this slot.
+    pub inventory: Arc<dyn Inventory>,
+    /// Index of this slot within its inventory.
+    pub index: usize,
+    /// Protocol ID for this slot (assigned by screen handler).
+    pub id: AtomicU8,
+}
+
+impl OffHandSlot {
+    /// Creates a new off-hand slot.
+    ///
+    /// # Arguments
+    /// - `inventory` - The containing inventory
+    /// - `index` - The slot index
+    pub fn new(inventory: Arc<dyn Inventory>, index: usize) -> Self {
+        Self {
+            inventory,
+            index,
+            id: AtomicU8::new(0),
+        }
+    }
+}
+
+impl Slot for OffHandSlot {
+    fn get_inventory(&self) -> Arc<dyn Inventory> {
+        self.inventory.clone()
+    }
+
+    fn get_index(&self) -> usize {
+        self.index
+    }
+
+    fn set_id(&self, id: usize) {
+        self.id.store(id as u8, Ordering::Relaxed);
+    }
+
+    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
+        Box::pin(async move {
+            self.inventory.mark_dirty();
+        })
+    }
+
+    fn on_equipped<'a>(
+        &'a self,
+        player: &'a dyn InventoryPlayer,
+        old_stack: ItemStack,
+        new_stack: ItemStack,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            player.on_equip_item(&EquipmentSlot::OFF_HAND, old_stack, new_stack).await;
+        })
+    }
+}
+
+
 /// An armor equipment slot.
 ///
 /// Restricts which items can be placed based on the equipment slot type:
@@ -442,10 +511,21 @@ impl Slot for ArmorSlot {
 
     fn set_stack_prev(&self, stack: ItemStack, _previous_stack: ItemStack) -> BoxFuture<'_, ()> {
         Box::pin(async move {
-            //TODO: this.entity.onEquipStack(this.equipmentSlot, previousStack, stack);
             self.set_stack_no_callbacks(stack).await;
         })
     }
+
+    fn on_equipped<'a>(
+        &'a self,
+        player: &'a dyn InventoryPlayer,
+        old_stack: ItemStack,
+        new_stack: ItemStack,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            player.on_equip_item(&self.equipment_slot, old_stack, new_stack).await;
+        })
+    }
+
 
     fn mark_dirty(&self) -> BoxFuture<'_, ()> {
         Box::pin(async move {

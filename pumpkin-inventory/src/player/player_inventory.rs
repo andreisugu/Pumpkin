@@ -254,7 +254,24 @@ impl PlayerInventory {
             return false;
         }
 
-        // TODO: if (stack.isDamaged()) {
+        if stack.is_damaged() {
+            let mut target_slot = slot;
+            if target_slot == -1 {
+                target_slot = self.get_empty_slot().await;
+            }
+
+            if target_slot >= 0 && target_slot < Self::MAIN_SIZE as i16 {
+                // Damaged items do not stack; place directly into the empty/specified slot
+                let binding = self.get_stack(target_slot as usize).await;
+                let mut self_stack = binding.lock().await;
+                if self_stack.is_empty() {
+                    *self_stack = stack.clone();
+                    stack.set_count(0);
+                    return true;
+                }
+            }
+            return false;
+        }
 
         let mut i;
 
@@ -271,10 +288,13 @@ impl PlayerInventory {
             }
         }
 
-        // TODO: Creative mode check
+        // Creative mode bypass (e.g. setting count to 0 and returning true) is handled
+        // by callers (e.g. in item pickup and projectile collection) as PlayerInventory
+        // does not hold a reference to the Player.
 
         stack.item_count < i
     }
+
 
     /// Finds the first slot containing a matching stack.
     ///

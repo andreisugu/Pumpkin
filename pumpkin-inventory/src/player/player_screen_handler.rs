@@ -25,7 +25,7 @@ use crate::crafting::recipes::{RecipeFinderScreenHandler, RecipeInputInventory};
 use crate::screen_handler::{
     InventoryPlayer, ItemStackFuture, ScreenHandler, ScreenHandlerBehaviour, ScreenHandlerFuture,
 };
-use crate::slot::{ArmorSlot, NormalSlot, Slot};
+use crate::slot::{ArmorSlot, OffHandSlot, Slot};
 use pumpkin_data::data_component_impl::{EquipmentSlot, EquipmentType, EquippableImpl};
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::screen::WindowType;
@@ -110,8 +110,7 @@ impl PlayerScreenHandler {
         player_screen_handler.add_player_slots(&player_inventory);
 
         // Offhand slot (index 40 in player inventory, 45 in screen handler)
-        // TODO: onEquipStack callback for offhand
-        player_screen_handler.add_slot(Arc::new(NormalSlot::new(player_inventory.clone(), 40)));
+        player_screen_handler.add_slot(Arc::new(OffHandSlot::new(player_inventory.clone(), 40)));
 
         player_screen_handler
     }

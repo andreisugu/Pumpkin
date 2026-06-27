@@ -104,5 +104,13 @@ impl EntityEquipment {
         self.equipment.clear();
     }
 
-    // TODO: tick - Equipment updates, durability damage, etc.
+    /// Tick hook for location-based enchantment effects (Frost Walker, Depth Strider, etc.)
+    ///
+    /// This is non-trivial and deferred as follow-up work.
+    /// Attribute modifier updates on equip/unequip are handled by
+    /// `LivingEntity::on_equip_item` in the `pumpkin` crate.
+    pub const fn tick(&self) {
+        // Deferred to follow-up work
+    }
 }
+

@@ -4972,4 +4972,15 @@ impl InventoryPlayer for Player {
             self.increment_stat(category, stat_id, amount).await;
         })
     }
+
+    fn on_equip_item<'a>(
+        &'a self,
+        slot: &'a EquipmentSlot,
+        old_stack: ItemStack,
+        new_stack: ItemStack,
+    ) -> PlayerFuture<'a, ()> {
+        Box::pin(async move {
+            self.living_entity.on_equip_item(slot.clone(), old_stack, new_stack).await;
+        })
+    }
 }
