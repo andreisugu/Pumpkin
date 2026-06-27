@@ -8,180 +8,105 @@
 //! - Left click drag - Evenly distributes items across slots
 //! - Right click drag - Places one item in each slot
 //! - Middle click drag (creative) - Creates full stacks in each slot (creative only)
-//!
-//! Note: This implementation is currently disabled/commented out pending completion.
 
-/*
-#[derive(Debug, Default)]
-pub struct DragHandler(RwLock<HashMap<u64, Arc<Mutex<Drag>>>>);
+use crate::screen_handler::{InventoryPlayer, ScreenHandler};
+use pumpkin_data::item_stack::ItemStack;
+use pumpkin_protocol::java::server::play::SlotActionType;
+use tracing::warn;
 
-impl DragHandler {
-    pub fn new() -> Self {
-        Self(RwLock::new(HashMap::new()))
-    }
-    pub async fn new_drag(
-        &self,
-        container_id: u64,
-        player: i32,
-        drag_type: MouseDragType,
-    ) -> Result<(), InventoryError> {
-        let drag = Drag {
-            player,
-            drag_type,
-            slots: vec![],
-        };
-        let mut drags = self.0.write().await;
-        drags.insert(container_id, Arc::new(Mutex::new(drag)));
-        Ok(())
-    }
+pub async fn handle_quick_craft<S: ScreenHandler + ?Sized>(
+    screen_handler: &mut S,
+    slot_index: i32,
+    button: i32,
+    player: &dyn InventoryPlayer,
+) {
+    let drag_type = button & 3;
+    let drag_button = (button >> 2) & 3;
+    let behaviour = screen_handler.get_behaviour_mut();
 
-    pub async fn add_slot(
-        &self,
-        container_id: u64,
-        player: i32,
-        slot: usize,
-    ) -> Result<(), InventoryError> {
-        let drags = self.0.read().await;
-        match drags.get(&container_id) {
-            Some(drag) => {
-                let mut drag = drag.lock().await;
-                if drag.player != player {
-                    Err(InventoryError::MultiplePlayersDragging)?
-                }
-                if !drag.slots.contains(&slot) {
-                    drag.slots.push(slot);
-                }
-            }
-            None => Err(InventoryError::OutOfOrderDragging)?,
+    if drag_type == 0 {
+        behaviour.drag_slots.clear();
+    } else if drag_type == 1 {
+        if slot_index < 0 {
+            warn!("Invalid slot index for drag action: {slot_index}. Must be >= 0");
+            return;
         }
-        Ok(())
-    }
+        let cursor_stack = behaviour.cursor_stack.lock().await;
 
-    pub async fn apply_drag<T: Container>(
-        &self,
-        maybe_carried_item: &mut Option<ItemStack>,
-        container: &mut T,
-        container_id: &u64,
-        player: i32,
-    ) -> Result<(), InventoryError> {
-        // The Minecraft client does still send dragging packets when not carrying an item!
-        if maybe_carried_item.is_none() {
-            return Ok(());
+        let slot = &behaviour.slots[slot_index as usize];
+        let stack_lock = slot.get_stack().await;
+        let stack = stack_lock.lock().await;
+        if !cursor_stack.is_empty()
+            && slot.can_insert(&cursor_stack).await
+            && (stack.are_items_and_components_equal(&cursor_stack) || stack.is_empty())
+            && slot.get_max_item_count_for_stack(&stack).await > stack.item_count
+        {
+            behaviour.drag_slots.push(slot_index as u32);
+        }
+    } else if drag_type == 2 && !behaviour.drag_slots.is_empty() {
+        // process drag end
+        if behaviour.drag_slots.len() == 1 {
+            let slot = behaviour.drag_slots[0] as i32;
+            behaviour.drag_slots.clear();
+            screen_handler
+                .internal_on_slot_click(slot, drag_button, SlotActionType::Pickup, player)
+                .await;
+
+            return;
+        }
+        if drag_button == 2 && !player.has_infinite_materials() {
+            return; // Only creative
         }
 
-        let mut drags = self.0.write().await;
-        let Some((_, drag)) = drags.remove_entry(container_id) else {
-            Err(InventoryError::OutOfOrderDragging)?
-        };
-        let drag = drag.lock().await;
+        let mut cursor_stack = behaviour.cursor_stack.lock().await;
+        let initial_count = cursor_stack.item_count;
+        for slot_index in &behaviour.drag_slots {
+            let slot = behaviour.slots[*slot_index as usize].clone();
+            let stack_lock = slot.get_stack().await;
+            let stack = stack_lock.lock().await;
 
-        if player != drag.player {
-            Err(InventoryError::MultiplePlayersDragging)?
-        }
-        let mut slots = container.all_slots();
-        let Some(carried_item) = maybe_carried_item else {
-            return Ok(());
-        };
-        match drag.drag_type {
-            // This is only valid in the Creative gamemode.
-            // Checked in any function that uses this function.
-            MouseDragType::Middle => {
-                for slot in &drag.slots {
-                    *slots[*slot] = maybe_carried_item.clone();
-                }
-            }
-            MouseDragType::Right => {
-                let changing_slots =
-                    drag.possibly_changing_slots(slots.as_ref(), carried_item.item.id);
-                changing_slots.into_iter().for_each(|slot| {
-                    if carried_item.item_count != 0 {
-                        if let Some(stack) = &mut slots[slot] {
-                            if stack.item_count < stack.item.components.max_stack_size {
-                                stack.item_count += 1;
-                                carried_item.item_count -= 1;
-                            }
-                        } else {
-                            *slots[slot] = Some(ItemStack {
-                                item: carried_item.item.clone(),
-                                item_count: 1,
-                            });
-                            carried_item.item_count -= 1;
-                        }
+            if (stack.are_items_and_components_equal(&cursor_stack) || stack.is_empty())
+                && slot.can_insert(&cursor_stack).await
+            {
+                let mut inserting_count = if drag_button == 0 {
+                    initial_count / behaviour.drag_slots.len() as u8
+                } else if drag_button == 1 {
+                    1
+                } else if drag_button == 2 {
+                    cursor_stack.item_count = cursor_stack.get_max_stack_size();
+                    cursor_stack.item_count
+                } else {
+                    panic!("Invalid drag button: {drag_button}");
+                };
+                inserting_count = inserting_count
+                    .min(
+                        slot.get_max_item_count_for_stack(&stack)
+                            .await
+                            .saturating_sub(stack.item_count),
+                    )
+                    .min(cursor_stack.item_count);
+                if inserting_count > 0 {
+                    let mut stack_clone = stack.clone();
+                    drop(stack);
+                    if stack_clone.is_empty() {
+                        stack_clone = cursor_stack.copy_with_count(0);
                     }
-                });
-
-                if carried_item.item_count == 0 {
-                    *maybe_carried_item = None
-                }
-            }
-            MouseDragType::Left => {
-                let changing_slots = drag.possibly_changing_slots(&slots, carried_item.item.id);
-                let amount_of_slots = changing_slots.len();
-
-                if amount_of_slots > 0 {
-                    let amount_per_slot = carried_item.item_count / (amount_of_slots as u8);
-                    let mut remaining = carried_item.item_count;
-
-                    for slot in changing_slots {
-                        if let Some(stack) = slots[slot].as_mut() {
-                            debug_assert!(stack.item.id == carried_item.item.id);
-                            let max_size = stack.item.components.max_stack_size;
-                            let new_count = (stack.item_count + amount_per_slot).min(max_size);
-                            let added = new_count - stack.item_count;
-                            stack.item_count = new_count;
-                            remaining -= added;
-                        } else {
-                            let max_size = carried_item.item.components.max_stack_size;
-                            let new_count = amount_per_slot.min(max_size);
-                            *slots[slot] = Some(ItemStack {
-                                item: carried_item.item.clone(),
-                                item_count: new_count,
-                            });
-                            remaining -= new_count;
-                        }
+                    stack_clone.increment(inserting_count);
+                    slot.set_stack(stack_clone).await;
+                    if drag_button != 2 {
+                        cursor_stack.decrement(inserting_count);
                     }
-
-                    if remaining > 0 {
-                        carried_item.item_count = remaining;
-                    } else {
-                        *maybe_carried_item = None
+                    if cursor_stack.is_empty() {
+                        *cursor_stack = ItemStack::EMPTY.clone();
+                        break;
                     }
                 }
             }
         }
-        Ok(())
+
+        if drag_button == 2 {
+            *cursor_stack = ItemStack::EMPTY.clone();
+        }
+        behaviour.drag_slots.clear();
     }
 }
-#[derive(Debug)]
-struct Drag {
-    player: i32,
-    drag_type: MouseDragType,
-    slots: Vec<usize>,
-}
-
-impl Drag {
-    fn possibly_changing_slots(
-        &self,
-        slots: &[&mut Option<ItemStack>],
-        carried_item_id: u16,
-    ) -> Box<[usize]> {
-        self.slots
-            .iter()
-            .filter_map(move |slot_index| {
-                let slot = &slots[*slot_index];
-
-                match slot {
-                    Some(item_slot) => {
-                        if item_slot.item.id == carried_item_id {
-                            Some(*slot_index)
-                        } else {
-                            None
-                        }
-                    }
-                    None => Some(*slot_index),
-                }
-            })
-            .collect()
-    }
-}
- */
