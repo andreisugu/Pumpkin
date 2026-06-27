@@ -3422,7 +3422,7 @@ impl Player {
             let stack = self.inventory.get_stack(slot_index).await;
             let eligible = {
                 let s = stack.lock().await;
-                s.get_enchantment_level(&Enchantment::MENDING) > 0 && s.get_damage() > 0
+                s.get_enchantment_level(&Enchantment::MENDING) > 0 && s.is_damaged()
             };
             if eligible {
                 candidates.push((slot_index, equipment_slot, stack));

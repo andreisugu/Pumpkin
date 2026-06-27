@@ -458,10 +458,17 @@ impl Slot for ArmorSlot {
         Box::pin(async move { 1 })
     }
 
-    /// TODO: Check for curse of binding enchantment.
-    fn can_take_items(&self, _player: &dyn InventoryPlayer) -> BoxFuture<'_, bool> {
+    fn can_take_items(&self, player: &dyn InventoryPlayer) -> BoxFuture<'_, bool> {
+        let stack_future = self.get_cloned_stack();
+        let is_creative = player.has_infinite_materials();
         Box::pin(async move {
-            // TODO: Check enchantments
+            if is_creative {
+                return true;
+            }
+            let stack = stack_future.await;
+            if stack.get_enchantment_level(&pumpkin_data::Enchantment::BINDING_CURSE) > 0 {
+                return false;
+            }
             true
         })
     }

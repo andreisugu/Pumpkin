@@ -283,6 +283,11 @@ impl ItemStack {
         self.get_max_damage().unwrap_or(0) > 0
     }
 
+    #[must_use]
+    pub fn is_damaged(&self) -> bool {
+        self.is_damageable() && self.get_damage() > 0
+    }
+
     pub fn repair_item(&mut self, amount: i32) -> i32 {
         if amount <= 0 {
             return 0;
@@ -385,7 +390,7 @@ impl ItemStack {
 
     #[must_use]
     pub fn is_stackable(&self) -> bool {
-        self.get_max_stack_size() > 1 // TODO: && (!this.isDamageable() || !this.isDamaged());
+        self.get_max_stack_size() > 1 && !self.is_damaged()
     }
 
     #[must_use]
