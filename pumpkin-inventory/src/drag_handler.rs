@@ -76,7 +76,8 @@ pub async fn handle_quick_craft<S: ScreenHandler + ?Sized>(
                     cursor_stack.item_count = cursor_stack.get_max_stack_size();
                     cursor_stack.item_count
                 } else {
-                    panic!("Invalid drag button: {drag_button}");
+                    warn!("Invalid drag button: {drag_button}");
+                    return;
                 };
                 inserting_count = inserting_count
                     .min(

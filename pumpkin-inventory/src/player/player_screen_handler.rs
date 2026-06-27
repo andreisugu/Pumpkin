@@ -134,8 +134,6 @@ impl ScreenHandler for PlayerScreenHandler {
         &mut self.behaviour
     }
 
-
-
     fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
         Box::pin(async move {
             self.default_on_closed(player).await;
