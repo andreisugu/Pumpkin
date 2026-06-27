@@ -27,10 +27,10 @@ impl ScreenHandlerFactory for ShulkerBoxScreenFactory {
         &'a self,
         sync_id: u8,
         player_inventory: &'a Arc<PlayerInventory>,
-        _player: &'a dyn InventoryPlayer,
+        player: &'a dyn InventoryPlayer,
     ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
         Box::pin(async move {
-            let handler = create_generic_9x3(sync_id, player_inventory, self.0.clone()).await;
+            let handler = create_generic_9x3(sync_id, player_inventory, self.0.clone(), player).await;
             let screen_handler_arc = Arc::new(Mutex::new(handler));
 
             Some(screen_handler_arc as SharedScreenHandler)

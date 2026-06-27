@@ -18,7 +18,7 @@ use tokio::sync::Mutex;
 
 use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture};
 
-use super::recipes::RecipeInputInventory;
+use super::recipes::{RecipeInputInventory, CraftingInput, PositionedCraftingInput, BoxFuture};
 
 /// A temporary inventory for crafting grids.
 ///
@@ -123,6 +123,26 @@ impl RecipeInputInventory for CraftingInventory {
 
     fn get_height(&self) -> usize {
         self.height as usize
+    }
+
+    fn create_recipe_input(&self) -> BoxFuture<'_, CraftingInput> {
+        Box::pin(async move {
+            let mut list = Vec::with_capacity(self.items.len());
+            for item in &self.items {
+                list.push(item.lock().await.clone());
+            }
+            CraftingInput::of(self.get_width(), self.get_height(), &list)
+        })
+    }
+
+    fn create_positioned_recipe_input(&self) -> BoxFuture<'_, PositionedCraftingInput> {
+        Box::pin(async move {
+            let mut list = Vec::with_capacity(self.items.len());
+            for item in &self.items {
+                list.push(item.lock().await.clone());
+            }
+            CraftingInput::of_positioned(self.get_width(), self.get_height(), &list)
+        })
     }
 }
 

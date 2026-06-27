@@ -31,10 +31,10 @@ impl ScreenHandlerFactory for HopperBlockScreenFactory {
         &'a self,
         sync_id: u8,
         player_inventory: &'a Arc<PlayerInventory>,
-        _player: &'a dyn InventoryPlayer,
+        player: &'a dyn InventoryPlayer,
     ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
         Box::pin(async move {
-            let concrete_handler = create_hopper(sync_id, player_inventory, self.0.clone()).await;
+            let concrete_handler = create_hopper(sync_id, player_inventory, self.0.clone(), player).await;
 
             let concrete_arc = Arc::new(Mutex::new(concrete_handler));
 

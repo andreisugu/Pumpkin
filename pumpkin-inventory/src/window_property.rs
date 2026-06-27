@@ -76,19 +76,46 @@ pub enum EnchantmentTable {
     EnchantmentLevel { slot: u8 },
 }
 
-// TODO: No more magic numbers
+impl EnchantmentTable {
+    pub const LEVEL_REQUIREMENT_0: i16 = 0;
+    pub const LEVEL_REQUIREMENT_1: i16 = 1;
+    pub const LEVEL_REQUIREMENT_2: i16 = 2;
+    pub const ENCHANTMENT_SEED: i16 = 3;
+    pub const ENCHANTMENT_ID_0: i16 = 4;
+    pub const ENCHANTMENT_ID_1: i16 = 5;
+    pub const ENCHANTMENT_ID_2: i16 = 6;
+    pub const ENCHANTMENT_LEVEL_0: i16 = 7;
+    pub const ENCHANTMENT_LEVEL_1: i16 = 8;
+    pub const ENCHANTMENT_LEVEL_2: i16 = 9;
+}
+
 impl WindowPropertyTrait for EnchantmentTable {
     fn to_id(self) -> i16 {
         use EnchantmentTable::{
             EnchantmentId, EnchantmentLevel, EnchantmentSeed, LevelRequirement,
         };
 
-        i16::from(match self {
-            LevelRequirement { slot } => slot,
-            EnchantmentSeed => 3,
-            EnchantmentId { slot } => 4 + slot,
-            EnchantmentLevel { slot } => 7 + slot,
-        })
+        match self {
+            LevelRequirement { slot } => match slot {
+                0 => Self::LEVEL_REQUIREMENT_0,
+                1 => Self::LEVEL_REQUIREMENT_1,
+                2 => Self::LEVEL_REQUIREMENT_2,
+                _ => slot as i16,
+            },
+            EnchantmentSeed => Self::ENCHANTMENT_SEED,
+            EnchantmentId { slot } => match slot {
+                0 => Self::ENCHANTMENT_ID_0,
+                1 => Self::ENCHANTMENT_ID_1,
+                2 => Self::ENCHANTMENT_ID_2,
+                _ => 4 + slot as i16,
+            },
+            EnchantmentLevel { slot } => match slot {
+                0 => Self::ENCHANTMENT_LEVEL_0,
+                1 => Self::ENCHANTMENT_LEVEL_1,
+                2 => Self::ENCHANTMENT_LEVEL_2,
+                _ => 7 + slot as i16,
+            },
+        }
     }
 }
 

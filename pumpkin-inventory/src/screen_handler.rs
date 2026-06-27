@@ -1020,29 +1020,56 @@ pub trait ScreenHandler: Send + Sync {
                     let slot_stack = slot.get_cloned_stack().await;
                     let mut cursor_stack = self.get_behaviour().cursor_stack.lock().await;
 
-                    if click_type == MouseClick::Right {
-                        let mut intercepted = false;
+                    let mut intercepted = false;
 
+                    if click_type == MouseClick::Left {
                         if !cursor_stack.is_empty() {
                             let stack_guard = slot.get_stack().await;
                             let mut inner_slot_stack = stack_guard.lock().await;
                             if let Some(bundle) = inner_slot_stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
-                                && bundle.try_insert(&mut cursor_stack) {
-                                    intercepted = true;
-                                }
+                                && slot.allow_modification(player).await
+                                && bundle.try_insert(&mut cursor_stack)
+                            {
+                                intercepted = true;
+                            }
                         }
 
                         if !intercepted && !slot_stack.is_empty()
-                            && let Some(bundle) = cursor_stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>() {
-                                let stack_guard = slot.get_stack().await;
-                                let mut inner_slot_stack = stack_guard.lock().await;
-                                if bundle.try_insert(&mut inner_slot_stack) {
-                                    if inner_slot_stack.item_count == 0 {
-                                        *inner_slot_stack = ItemStack::EMPTY.clone();
-                                    }
-                                    intercepted = true;
+                            && let Some(bundle) = cursor_stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
+                        {
+                            let stack_guard = slot.get_stack().await;
+                            let mut inner_slot_stack = stack_guard.lock().await;
+                            if bundle.try_insert(&mut inner_slot_stack) {
+                                if inner_slot_stack.item_count == 0 {
+                                    *inner_slot_stack = ItemStack::EMPTY.clone();
                                 }
+                                intercepted = true;
                             }
+                        }
+                    } else if click_type == MouseClick::Right {
+                        if !cursor_stack.is_empty() {
+                            let stack_guard = slot.get_stack().await;
+                            let mut inner_slot_stack = stack_guard.lock().await;
+                            if let Some(bundle) = inner_slot_stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
+                                && slot.allow_modification(player).await
+                                && bundle.try_insert(&mut cursor_stack)
+                            {
+                                intercepted = true;
+                            }
+                        }
+
+                        if !intercepted && !slot_stack.is_empty()
+                            && let Some(bundle) = cursor_stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
+                        {
+                            let stack_guard = slot.get_stack().await;
+                            let mut inner_slot_stack = stack_guard.lock().await;
+                            if bundle.try_insert(&mut inner_slot_stack) {
+                                if inner_slot_stack.item_count == 0 {
+                                    *inner_slot_stack = ItemStack::EMPTY.clone();
+                                }
+                                intercepted = true;
+                            }
+                        }
 
                         if !intercepted && cursor_stack.is_empty() {
                             let stack_guard = slot.get_stack().await;
@@ -1056,18 +1083,19 @@ pub trait ScreenHandler: Send + Sync {
 
                         if !intercepted && slot_stack.is_empty()
                             && let Some(bundle) = cursor_stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
-                                && let Some(extracted) = bundle.try_extract() {
-                                    slot.set_stack(extracted).await;
-                                    intercepted = true;
-                                }
-
-                        if intercepted {
-                            if cursor_stack.item_count == 0 {
-                                *cursor_stack = ItemStack::EMPTY.clone();
-                            }
-                            slot.mark_dirty().await;
-                            return;
+                            && let Some(extracted) = bundle.try_extract()
+                        {
+                            slot.set_stack(extracted).await;
+                            intercepted = true;
                         }
+                    }
+
+                    if intercepted {
+                        if cursor_stack.item_count == 0 {
+                            *cursor_stack = ItemStack::EMPTY.clone();
+                        }
+                        slot.mark_dirty().await;
+                        return;
                     }
 
                     let equipment_slot = cursor_stack

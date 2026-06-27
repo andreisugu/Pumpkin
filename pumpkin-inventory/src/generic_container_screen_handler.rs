@@ -30,6 +30,7 @@ pub async fn create_generic_9x3(
     sync_id: u8,
     player_inventory: &Arc<PlayerInventory>,
     inventory: Arc<dyn Inventory>,
+    player: &dyn InventoryPlayer,
 ) -> GenericContainerScreenHandler {
     GenericContainerScreenHandler::new(
         WindowType::Generic9x3,
@@ -38,6 +39,7 @@ pub async fn create_generic_9x3(
         inventory,
         3,
         9,
+        player,
     )
     .await
 }
@@ -49,6 +51,7 @@ pub async fn create_generic_9x6(
     sync_id: u8,
     player_inventory: &Arc<PlayerInventory>,
     inventory: Arc<dyn Inventory>,
+    player: &dyn InventoryPlayer,
 ) -> GenericContainerScreenHandler {
     GenericContainerScreenHandler::new(
         WindowType::Generic9x6,
@@ -57,6 +60,7 @@ pub async fn create_generic_9x6(
         inventory,
         6,
         9,
+        player,
     )
     .await
 }
@@ -68,6 +72,7 @@ pub async fn create_generic_3x3(
     sync_id: u8,
     player_inventory: &Arc<PlayerInventory>,
     inventory: Arc<dyn Inventory>,
+    player: &dyn InventoryPlayer,
 ) -> GenericContainerScreenHandler {
     GenericContainerScreenHandler::new(
         WindowType::Generic3x3,
@@ -76,6 +81,7 @@ pub async fn create_generic_3x3(
         inventory,
         3,
         3,
+        player,
     )
     .await
 }
@@ -87,6 +93,7 @@ pub async fn create_hopper(
     sync_id: u8,
     player_inventory: &Arc<PlayerInventory>,
     inventory: Arc<dyn Inventory>,
+    player: &dyn InventoryPlayer,
 ) -> GenericContainerScreenHandler {
     GenericContainerScreenHandler::new(
         WindowType::Hopper,
@@ -95,6 +102,7 @@ pub async fn create_hopper(
         inventory,
         1,
         5,
+        player,
     )
     .await
 }
@@ -124,6 +132,7 @@ impl GenericContainerScreenHandler {
     /// - `inventory` - The container's inventory
     /// - `rows` - Number of rows in the container
     /// - `columns` - Number of columns in the container
+    /// - `player` - The player opening the container
     async fn new(
         screen_type: WindowType,
         sync_id: u8,
@@ -131,6 +140,7 @@ impl GenericContainerScreenHandler {
         inventory: Arc<dyn Inventory>,
         rows: u8,
         columns: u8,
+        _player: &dyn InventoryPlayer,
     ) -> Self {
         let mut handler = Self {
             inventory: inventory.clone(),
@@ -139,7 +149,6 @@ impl GenericContainerScreenHandler {
             behaviour: ScreenHandlerBehaviour::new(sync_id, Some(screen_type)),
         };
 
-        // TODO: Add player entity as a parameter
         inventory.on_open().await;
 
         handler.add_inventory_slots();

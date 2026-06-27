@@ -42,13 +42,13 @@ impl ScreenHandlerFactory for ChestScreenFactory {
         &'a self,
         sync_id: u8,
         player_inventory: &'a Arc<PlayerInventory>,
-        _player: &'a dyn InventoryPlayer,
+        player: &'a dyn InventoryPlayer,
     ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
         Box::pin(async move {
             let concrete_handler = if self.0.size() > 27 {
-                create_generic_9x6(sync_id, player_inventory, self.0.clone()).await
+                create_generic_9x6(sync_id, player_inventory, self.0.clone(), player).await
             } else {
-                create_generic_9x3(sync_id, player_inventory, self.0.clone()).await
+                create_generic_9x3(sync_id, player_inventory, self.0.clone(), player).await
             };
 
             let concrete_arc = Arc::new(Mutex::new(concrete_handler));
