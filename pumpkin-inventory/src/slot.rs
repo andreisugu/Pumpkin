@@ -205,6 +205,11 @@ pub trait Slot: Send + Sync {
         Box::pin(async move { true })
     }
 
+    /// Checks if this slot allows its item to be gathered during a double-click (`PickupAll`) action.
+    fn can_take_item_for_pick_all(&self) -> bool {
+        true
+    }
+
     /// Checks if this slot can be modified by the player.
     ///
     /// Mojang name: `allowModification`

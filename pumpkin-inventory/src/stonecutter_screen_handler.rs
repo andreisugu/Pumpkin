@@ -199,6 +199,9 @@ impl Slot for StonecutterOutputSlot {
     fn set_id(&self, id: usize) {
         self.id.store(id as u8, Ordering::Relaxed);
     }
+    fn can_take_item_for_pick_all(&self) -> bool {
+        false
+    }
 
     fn on_take_item<'a>(
         &'a self,

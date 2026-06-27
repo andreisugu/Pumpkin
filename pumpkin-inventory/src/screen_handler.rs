@@ -269,11 +269,6 @@ pub trait ScreenHandler: Send + Sync {
         true
     }
 
-    /// Checks if an item can be taken from a slot during a double-click (`PickupAll`) action.
-    fn can_take_item_for_pick_all(&self, _stack: &ItemStack, _slot: Arc<dyn Slot>) -> bool {
-        true
-    }
-
     /// Gets a reference to the screen handler behaviour.
     fn get_behaviour(&self) -> &ScreenHandlerBehaviour;
 
@@ -882,7 +877,7 @@ pub trait ScreenHandler: Send + Sync {
                                 if !target_stack.is_empty()
                                     && target_stack.are_items_and_components_equal(&cursor_stack)
                                     && target.can_take_items(player).await
-                                    && self.can_take_item_for_pick_all(&cursor_stack, target.clone())
+                                    && target.can_take_item_for_pick_all()
                                     && (pass != 0
                                         || target_stack.item_count
                                             != target_stack.get_max_stack_size())
