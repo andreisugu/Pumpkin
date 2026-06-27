@@ -287,6 +287,28 @@ impl ItemStack {
     pub fn is_damaged(&self) -> bool {
         self.is_damageable() && self.get_damage() > 0
     }
+    /// Returns all attribute modifiers from this item's `AttributeModifiers` component that
+    /// are active when the item is held/worn in `slot`.
+    ///
+    /// A modifier applies if its `slot` field matches `slot` exactly, or is
+    /// [`AttributeModifierSlot::Any`] (active in every slot).
+    ///
+    /// This mirrors vanilla's `ItemStack.getAttributeModifiers(EquipmentSlot)` logic.
+    #[must_use]
+    pub fn get_attribute_modifiers_for_slot(
+        &self,
+        slot: &crate::AttributeModifierSlot,
+    ) -> Vec<&crate::data_component_impl::Modifier> {
+        use crate::data_component_impl::AttributeModifiersImpl;
+        if let Some(comp) = self.get_data_component::<AttributeModifiersImpl>() {
+            comp.attribute_modifiers
+                .iter()
+                .filter(|m| &m.slot == slot || m.slot == crate::AttributeModifierSlot::Any)
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
 
     pub fn repair_item(&mut self, amount: i32) -> i32 {
         if amount <= 0 {
@@ -300,6 +322,7 @@ impl ItemStack {
         self.set_damage(damage - repaired);
         repaired
     }
+
 
     /// Core logic: apply Unbreaking chance with precomputed armor category and level.
     /// Extracted for use in damage_item where these values are hoisted outside the loop.

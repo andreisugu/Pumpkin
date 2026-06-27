@@ -1315,7 +1315,27 @@ impl EquipmentSlot {
             Self::Saddle(_) => 7,
         }
     }
+
+    /// Maps this equipment slot to the corresponding [`AttributeModifierSlot`] filter used
+    /// when reading an item's built-in `AttributeModifiers` data component.
+    ///
+    /// This allows the attribute modifier system to determine which modifiers should be active
+    /// when an item is in a particular slot (e.g. armor values only activate in armor slots).
+    #[must_use]
+    pub const fn to_attribute_modifier_slot(&self) -> AttributeModifierSlot {
+        match self {
+            Self::MainHand(_) => AttributeModifierSlot::MainHand,
+            Self::OffHand(_) => AttributeModifierSlot::OffHand,
+            Self::Feet(_) => AttributeModifierSlot::Feet,
+            Self::Legs(_) => AttributeModifierSlot::Legs,
+            Self::Chest(_) => AttributeModifierSlot::Chest,
+            Self::Head(_) => AttributeModifierSlot::Head,
+            Self::Body(_) => AttributeModifierSlot::Body,
+            Self::Saddle(_) => AttributeModifierSlot::Saddle,
+        }
+    }
 }
+
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum EntityTypeOrTag {

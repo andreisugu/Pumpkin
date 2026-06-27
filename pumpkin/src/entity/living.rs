@@ -200,8 +200,76 @@ impl LivingEntity {
         );
     }
 
+    /// Removes all attribute modifiers that were applied because an item was in `slot`.
+    ///
+    /// Should be called **before** the slot is updated so the old item's modifiers are cleaned up.
+    fn remove_item_attribute_modifiers(&self, old_stack: &ItemStack, slot: &EquipmentSlot) {
+        let attr_slot = slot.to_attribute_modifier_slot();
+        for modifier in old_stack.get_attribute_modifiers_for_slot(&attr_slot) {
+            self.update_attribute(modifier.r#type, |inst| {
+                inst.remove_modifier(modifier.id);
+            });
+        }
+    }
+
+    /// Applies all attribute modifiers from `new_stack` that should be active in `slot`.
+    ///
+    /// Should be called **after** the slot has been updated to the new item.
+    fn apply_item_attribute_modifiers(&self, new_stack: &ItemStack, slot: &EquipmentSlot) {
+        let attr_slot = slot.to_attribute_modifier_slot();
+        for modifier in new_stack.get_attribute_modifiers_for_slot(&attr_slot) {
+            let op = match modifier.operation {
+                Operation::AddValue => ModifierOperation::Add,
+                Operation::AddMultipliedBase => ModifierOperation::MultiplyBase,
+                Operation::AddMultipliedTotal => ModifierOperation::MultiplyTotal,
+            };
+            let runtime_mod = Modifier {
+                id: modifier.id.to_string(),
+                amount: modifier.amount,
+                operation: op,
+            };
+            self.update_attribute(modifier.r#type, |inst| {
+                inst.add_or_replace_modifier(runtime_mod.clone());
+            });
+        }
+    }
+
+    /// High-level equipment change handler.
+    ///
+    /// 1. Removes attribute modifiers contributed by the old item in `slot`.
+    /// 2. Applies attribute modifiers contributed by the new item in `slot`.
+    /// 3. Broadcasts the equipment packet to nearby clients.
+    /// 4. Sends attribute update packets so clients show current values.
+    ///
+    /// This is the Rust equivalent of Java's `onEquipItem` + `detectEquipmentUpdates` pair.
+    pub async fn on_equip_item(&self, slot: EquipmentSlot, old_stack: ItemStack, new_stack: ItemStack) {
+        // 1. Strip modifiers from the outgoing item
+        self.remove_item_attribute_modifiers(&old_stack, &slot);
+
+        // 2. Apply modifiers from the incoming item
+        self.apply_item_attribute_modifiers(&new_stack, &slot);
+
+        // 3. Broadcast the visual equipment change to other clients
+        self.send_equipment_changes(&[(slot.clone(), new_stack.clone())]);
+
+        // 4. Collect which Attributes were touched so we can sync them
+        let attr_slot = slot.to_attribute_modifier_slot();
+        let mut touched: Vec<Attributes> = Vec::new();
+        for stack in [&old_stack, &new_stack] {
+            for m in stack.get_attribute_modifiers_for_slot(&attr_slot) {
+                if !touched.iter().any(|a| a.id == m.r#type.id) {
+                    touched.push(m.r#type.clone());
+                }
+            }
+        }
+        if !touched.is_empty() {
+            crate::entity::attributes::send_attribute_updates_for_living(self, touched).await;
+        }
+    }
+
     /// Picks up and Item entity or XP Orb
     pub fn pickup(&self, item: &Entity, stack_amount: u32) {
+
         let chunk_pos = self.entity.chunk_pos.load();
         self.entity.world.load().broadcast_to_chunk_editioned_sync(
             chunk_pos,
