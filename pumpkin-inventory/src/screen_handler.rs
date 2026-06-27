@@ -269,6 +269,11 @@ pub trait ScreenHandler: Send + Sync {
         true
     }
 
+    /// Checks if an item can be taken from a slot during a double-click (`PickupAll`) action.
+    fn can_take_item_for_pick_all(&self, _stack: &ItemStack, _slot: Arc<dyn Slot>) -> bool {
+        true
+    }
+
     /// Gets a reference to the screen handler behaviour.
     fn get_behaviour(&self) -> &ScreenHandlerBehaviour;
 
@@ -850,34 +855,51 @@ pub trait ScreenHandler: Send + Sync {
         player: &'a dyn InventoryPlayer,
     ) -> ScreenHandlerFuture<'a, ()> {
         Box::pin(async move {
-            if action_type == SlotActionType::PickupAll && button == 0 {
-                let behavior = self.get_behaviour_mut();
+            if action_type == SlotActionType::PickupAll && slot_index >= 0 {
+                let behavior = self.get_behaviour();
                 let mut cursor_stack = behavior.cursor_stack.lock().await;
-                let mut to_pick_up = cursor_stack.get_max_stack_size() - cursor_stack.item_count;
+                if slot_index < behavior.slots.len() as i32 {
+                    let slotxx = behavior.slots[slot_index as usize].clone();
+                    if !cursor_stack.is_empty()
+                        && (!slotxx.has_stack().await || !slotxx.can_take_items(player).await)
+                    {
+                        let slots_len = behavior.slots.len();
+                        let indices: Vec<usize> = if button == 0 {
+                            (0..slots_len).collect()
+                        } else {
+                            (0..slots_len).rev().collect()
+                        };
 
-                for slot in &behavior.slots {
-                    if to_pick_up == 0 {
-                        break;
+                        for pass in 0..2 {
+                            for &i in &indices {
+                                if cursor_stack.item_count >= cursor_stack.get_max_stack_size() {
+                                    break;
+                                }
+
+                                let target = behavior.slots[i].clone();
+                                let target_stack = target.get_cloned_stack().await;
+
+                                if !target_stack.is_empty()
+                                    && target_stack.are_items_and_components_equal(&cursor_stack)
+                                    && target.can_take_items(player).await
+                                    && self.can_take_item_for_pick_all(&cursor_stack, target.clone())
+                                    && (pass != 0
+                                        || target_stack.item_count
+                                            != target_stack.get_max_stack_size())
+                                {
+                                    let taken_stack = target
+                                        .safe_take(
+                                            target_stack.item_count,
+                                            cursor_stack.get_max_stack_size()
+                                                - cursor_stack.item_count,
+                                            player,
+                                        )
+                                        .await;
+                                    cursor_stack.increment(taken_stack.item_count);
+                                }
+                            }
+                        }
                     }
-
-                    let item_stack = slot.get_cloned_stack().await;
-                    if !item_stack.are_items_and_components_equal(&cursor_stack) {
-                        continue;
-                    }
-
-                    if !slot.allow_modification(player).await {
-                        continue;
-                    }
-
-                    let taken_stack = slot
-                        .safe_take(
-                            item_stack.item_count.min(to_pick_up),
-                            cursor_stack.get_max_stack_size() - cursor_stack.item_count,
-                            player,
-                        )
-                        .await;
-                    to_pick_up -= taken_stack.item_count;
-                    cursor_stack.increment(taken_stack.item_count);
                 }
             } else if action_type == SlotActionType::QuickCraft {
                 crate::drag_handler::handle_quick_craft(self, slot_index, button, player).await;

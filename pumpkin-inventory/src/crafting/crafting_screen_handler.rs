@@ -598,6 +598,14 @@ impl ScreenHandler for CraftingTableScreenHandler {
     fn get_behaviour_mut(&mut self) -> &mut ScreenHandlerBehaviour {
         &mut self.behaviour
     }
+    fn can_take_item_for_pick_all(&self, _stack: &ItemStack, slot: Arc<dyn Slot>) -> bool {
+        let behaviour = self.get_behaviour();
+        behaviour
+            .slots
+            .iter()
+            .position(|s| Arc::ptr_eq(s, &slot))
+            != Some(0)
+    }
     fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
         Box::pin(async move {
             self.default_on_closed(player).await;
